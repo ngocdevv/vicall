@@ -1,0 +1,17 @@
+{
+  "name": "vicall",
+  "private": true,
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ngocdevv/vicall.git"
+  },
+  "workspaces": [
+    "modules/*"
+  ],
+  "scripts": {
+    "build:call-manager": "npm --workspace expo-vicall-call-manager run build",
+    "lint:call-manager": "npm --workspace expo-vicall-call-manager run lint",
+    "typecheck:call-manager": "npm --workspace expo-vicall-call-manager run typecheck"
+  }
+}

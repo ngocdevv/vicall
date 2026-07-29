@@ -1,0 +1,19 @@
+{
+  "platforms": [
+    "apple",
+    "android"
+  ],
+  "apple": {
+    "modules": [
+      "ExpoVicallCallManagerModule"
+    ],
+    "appDelegateSubscribers": [
+      "VicallCallManagerAppDelegateSubscriber"
+    ]
+  },
+  "android": {
+    "modules": [
+      "expo.modules.vicallcallmanager.ExpoVicallCallManagerModule"
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "expo-vicall-call-manager",
+  "version": "0.1.0",
+  "description": "New Architecture Expo module for iOS CallKit/PushKit and Android self-managed ConnectionService",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ngocdevv/vicall.git",
+    "directory": "modules/expo-vicall-call-manager"
+  },
+  "homepage": "https://github.com/ngocdevv/vicall/tree/main/modules/expo-vicall-call-manager#readme",
+  "bugs": {
+    "url": "https://github.com/ngocdevv/vicall/issues"
+  },
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "src",
+    "build",
+    "ios/*.swift",
+    "ios/*.podspec",
+    "android/build.gradle",
+    "android/src",
+    "app.plugin.js",
+    "expo-module.config.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "expo-module build",
+    "clean": "expo-module clean",
+    "lint": "expo-module lint",
+    "typecheck": "tsc --noEmit",
+    "prepare": "expo-module build"
+  },
+  "keywords": [
+    "expo",
+    "react-native",
+    "callkit",
+    "pushkit",
+    "connectionservice",
+    "voip"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "expo": ">=56",
+    "expo-notifications": ">=56 <57",
+    "react": ">=19",
+    "react-native": ">=0.85"
+  },
+  "devDependencies": {
+    "@expo/config-plugins": "^56.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-universe": "^15.2.0",
+    "expo": "^56.0.0",
+    "expo-notifications": "^56.0.22",
+    "expo-module-scripts": "^56.0.3",
+    "react": "^19.2.0",
+    "react-native": "^0.85.0",
+    "typescript": "^5.9.2"
+  },
+  "expo": {
+    "autolinking": {
+      "exclude": []
+    }
+  }
+}

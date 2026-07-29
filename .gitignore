@@ -1,0 +1,9 @@
+node_modules/
+/build/
+.verification/
+.DS_Store
+*.log
+**/ios/Pods/
+**/android/.gradle/
+**/android/build/
+tmp/

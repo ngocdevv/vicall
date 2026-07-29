@@ -1,0 +1,26 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.vicallcallmanager'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.vicallcallmanager"
+
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+
+  lint {
+    abortOnError false
+  }
+}
+
+dependencies {
+  implementation "androidx.core:core-ktx:1.16.0"
+  compileOnly "host.exp.exponent:expo.modules.notifications:56.0.22"
+  compileOnly "com.google.firebase:firebase-messaging:25.0.1"
+}
