@@ -1,11 +1,13 @@
+import AVKit
 import ExpoModulesCore
 import Foundation
+import UIKit
 
 public final class ExpoVicallCallManagerModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ExpoVicallCallManager")
 
-    Events("onCallEvent")
+    Events("onCallEvent", "onPictureInPictureEvent")
 
     OnStartObserving("onCallEvent") {
       VicallCallEventStore.shared.attach { [weak self] event in
@@ -13,12 +15,26 @@ public final class ExpoVicallCallManagerModule: Module {
       }
     }
 
+    OnStartObserving("onPictureInPictureEvent") {
+      VicallPictureInPictureEventStore.shared.attach { [weak self] event in
+        self?.sendEvent("onPictureInPictureEvent", event)
+      }
+    }
+
     OnStopObserving("onCallEvent") {
       VicallCallEventStore.shared.detach()
     }
 
+    OnStopObserving("onPictureInPictureEvent") {
+      VicallPictureInPictureEventStore.shared.detach()
+    }
+
     OnDestroy {
       VicallCallEventStore.shared.detach()
+      VicallPictureInPictureEventStore.shared.detach()
+      DispatchQueue.main.async {
+        VicallPictureInPictureManager.shared.dispose()
+      }
     }
 
     AsyncFunction("setup") {
@@ -124,6 +140,60 @@ public final class ExpoVicallCallManagerModule: Module {
 
     AsyncFunction("openFullScreenIntentSettings") {
       // iOS does not expose an equivalent setting.
+    }
+
+    AsyncFunction("isPictureInPictureSupported") {
+      AVPictureInPictureController.isPictureInPictureSupported()
+    }
+
+    AsyncFunction("isPictureInPictureActive") {
+      VicallPictureInPictureManager.shared.isActive
+    }.runOnQueue(.main)
+
+    AsyncFunction("preparePictureInPicture") {
+      (
+        videoViewTag: Int,
+        localVideoViewTag: Int?,
+        options: [String: Any]?
+      ) in
+      guard let sourceView = appContext?.findView(
+        withTag: videoViewTag,
+        ofType: UIView.self
+      ) else {
+        throw VicallPictureInPictureError.sourceViewNotFound
+      }
+      let localVideoView = localVideoViewTag.flatMap { tag in
+        appContext?.findView(withTag: tag, ofType: UIView.self)
+      }
+      try VicallPictureInPictureManager.shared.prepare(
+        sourceView: sourceView,
+        localVideoView: localVideoView,
+        options: options
+      )
+    }.runOnQueue(.main)
+
+    AsyncFunction("setPictureInPictureAutoEnterEnabled") { (enabled: Bool) in
+      try VicallPictureInPictureManager.shared.setAutoEnterEnabled(enabled)
+    }.runOnQueue(.main)
+
+    AsyncFunction("startPictureInPicture") {
+      try VicallPictureInPictureManager.shared.start()
+    }.runOnQueue(.main)
+
+    AsyncFunction("stopPictureInPicture") {
+      VicallPictureInPictureManager.shared.stop()
+    }.runOnQueue(.main)
+
+    AsyncFunction("disposePictureInPicture") {
+      VicallPictureInPictureManager.shared.dispose()
+    }.runOnQueue(.main)
+
+    AsyncFunction("getInitialPictureInPictureEvents") {
+      VicallPictureInPictureEventStore.shared.initialEvents()
+    }
+
+    AsyncFunction("clearInitialPictureInPictureEvents") {
+      VicallPictureInPictureEventStore.shared.clearInitialEvents()
     }
   }
 }

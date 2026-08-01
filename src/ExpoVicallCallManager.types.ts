@@ -27,6 +27,15 @@ export type CallEventType =
   | "voipTokenUpdated"
   | "voipTokenInvalidated";
 
+export type PictureInPictureEventType =
+  | "willStart"
+  | "didStart"
+  | "failedToStart"
+  | "willStop"
+  | "didStop"
+  | "restoreRequested"
+  | "stateChanged";
+
 export type CallMetadata = Record<string, string | number | boolean | null>;
 
 export interface IncomingCall {
@@ -71,14 +80,43 @@ export interface CallEvent {
   metadata?: CallMetadata;
 }
 
+export interface PictureInPictureSourceRect {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+}
+
+export interface PictureInPictureOptions {
+  /** Preferred PiP aspect ratio. Defaults to 9:16. */
+  aspectRatioHeight?: number;
+  aspectRatioWidth?: number;
+  /** Automatically enter PiP when the user sends the app to the background. */
+  autoEnterEnabled?: boolean;
+  /** Android 12+: use seamless resizing for video content. */
+  seamlessResizeEnabled?: boolean;
+  /** Optional Android screen-space transition source rectangle. */
+  sourceRect?: PictureInPictureSourceRect;
+}
+
+export interface PictureInPictureEvent {
+  eventId: string;
+  type: PictureInPictureEventType;
+  timestamp: number;
+  active: boolean;
+  error?: string;
+}
+
 export interface ExpoVicallCallManagerEvents {
   [event: string]: (...args: any[]) => void;
   onCallEvent(event: CallEvent): void;
+  onPictureInPictureEvent(event: PictureInPictureEvent): void;
 }
 
 export interface VicallCallManagerPluginOptions {
   appName?: string;
   supportsVideo?: boolean;
+  enablePictureInPicture?: boolean;
   includesCallsInRecents?: boolean;
   maximumCallGroups?: number;
   maximumCallsPerCallGroup?: number;

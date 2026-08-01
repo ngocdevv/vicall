@@ -7,6 +7,8 @@ import type {
   IncomingCall,
   NativeCall,
   OutgoingCall,
+  PictureInPictureEvent,
+  PictureInPictureOptions,
 } from "./ExpoVicallCallManager.types";
 
 declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallManagerEvents> {
@@ -34,6 +36,19 @@ declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallMan
   getVoipPushToken(): Promise<string | null>;
   canUseFullScreenIntent(): Promise<boolean>;
   openFullScreenIntentSettings(): Promise<void>;
+  isPictureInPictureSupported(): Promise<boolean>;
+  isPictureInPictureActive(): Promise<boolean>;
+  preparePictureInPicture(
+    videoViewTag: number,
+    localVideoViewTag: number | null,
+    options?: PictureInPictureOptions,
+  ): Promise<void>;
+  setPictureInPictureAutoEnterEnabled(enabled: boolean): Promise<void>;
+  startPictureInPicture(): Promise<void>;
+  stopPictureInPicture(): Promise<void>;
+  disposePictureInPicture(): Promise<void>;
+  getInitialPictureInPictureEvents(): Promise<PictureInPictureEvent[]>;
+  clearInitialPictureInPictureEvents(): Promise<void>;
 }
 
 export default requireNativeModule<ExpoVicallCallManagerModule>(

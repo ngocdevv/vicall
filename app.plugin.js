@@ -3,6 +3,7 @@ const {
   createRunOncePlugin,
   withAndroidManifest,
   withInfoPlist,
+  withMainActivity,
 } = require("@expo/config-plugins");
 
 const pkg = require("./package.json");
@@ -76,10 +77,70 @@ function configureFirebaseMessagingService(manifest, application) {
   );
 }
 
+function configurePictureInPictureManifest(manifest) {
+  const activity = AndroidConfig.Manifest.getMainActivityOrThrow(manifest);
+  activity.$ = activity.$ || {};
+  activity.$["android:supportsPictureInPicture"] = "true";
+
+  const requiredChanges = [
+    "keyboard",
+    "keyboardHidden",
+    "orientation",
+    "screenLayout",
+    "screenSize",
+    "smallestScreenSize",
+    "uiMode",
+  ];
+  const existingChanges = String(activity.$["android:configChanges"] || "")
+    .split("|")
+    .filter(Boolean);
+  activity.$["android:configChanges"] = appendUnique(
+    existingChanges,
+    requiredChanges,
+  ).join("|");
+}
+
+function addPictureInPictureCallback(contents, language) {
+  const marker = "expo-vicall-call-manager: PiP callback";
+  if (contents.includes(marker)) return contents;
+
+  const method =
+    language === "java"
+      ? `
+  // ${marker}
+  @Override
+  public void onPictureInPictureModeChanged(
+      boolean isInPictureInPictureMode,
+      android.content.res.Configuration newConfig) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+    expo.modules.vicallcallmanager.VicallPictureInPictureManager
+        .onPictureInPictureModeChanged(isInPictureInPictureMode);
+  }
+`
+      : `
+  // ${marker}
+  override fun onPictureInPictureModeChanged(
+    isInPictureInPictureMode: Boolean,
+    newConfig: android.content.res.Configuration,
+  ) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    expo.modules.vicallcallmanager.VicallPictureInPictureManager
+      .onPictureInPictureModeChanged(isInPictureInPictureMode)
+  }
+`;
+
+  const lastBrace = contents.lastIndexOf("}");
+  if (lastBrace < 0) {
+    throw new Error("Unable to add the Picture in Picture callback to MainActivity");
+  }
+  return `${contents.slice(0, lastBrace)}${method}${contents.slice(lastBrace)}`;
+}
+
 function withVicallCallManager(config, props = {}) {
   const {
     appName = config.name || "Vicall",
     supportsVideo = true,
+    enablePictureInPicture = true,
     includesCallsInRecents = false,
     maximumCallGroups = 1,
     maximumCallsPerCallGroup = 1,
@@ -101,10 +162,13 @@ function withVicallCallManager(config, props = {}) {
       ...(ringtoneSound ? { ringtoneSound } : {}),
     };
 
-    if (enableVoipPush) {
+    if (enableVoipPush || enablePictureInPicture) {
       mod.modResults.UIBackgroundModes = appendUnique(
         mod.modResults.UIBackgroundModes,
-        ["voip", "remote-notification", "audio"],
+        [
+          ...(enableVoipPush ? ["voip", "remote-notification"] : []),
+          ...(enablePictureInPicture ? ["audio"] : []),
+        ],
       );
     }
 
@@ -138,9 +202,22 @@ function withVicallCallManager(config, props = {}) {
       androidNotificationIcon,
     );
     configureFirebaseMessagingService(mod.modResults.manifest, application);
+    if (enablePictureInPicture) {
+      configurePictureInPictureManifest(mod.modResults);
+    }
 
     return mod;
   });
+
+  if (enablePictureInPicture) {
+    config = withMainActivity(config, (mod) => {
+      mod.modResults.contents = addPictureInPictureCallback(
+        mod.modResults.contents,
+        mod.modResults.language,
+      );
+      return mod;
+    });
+  }
 
   return config;
 }
