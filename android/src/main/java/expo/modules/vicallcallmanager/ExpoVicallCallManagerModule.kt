@@ -14,7 +14,7 @@ class ExpoVicallCallManagerModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("ExpoVicallCallManager")
 
-    Events("onCallEvent")
+    Events("onCallEvent", "onPictureInPictureEvent")
 
     OnStartObserving("onCallEvent") {
       VicallCallEventStore.attach { event ->
@@ -22,12 +22,41 @@ class ExpoVicallCallManagerModule : Module() {
       }
     }
 
+    OnStartObserving("onPictureInPictureEvent") {
+      VicallPictureInPictureEventStore.attach { event ->
+        sendEvent("onPictureInPictureEvent", event)
+      }
+    }
+
     OnStopObserving("onCallEvent") {
       VicallCallEventStore.detach()
     }
 
+    OnStopObserving("onPictureInPictureEvent") {
+      VicallPictureInPictureEventStore.detach()
+    }
+
     OnDestroy {
       VicallCallEventStore.detach()
+      VicallPictureInPictureEventStore.detach()
+      VicallPictureInPictureManager.dispose(appContext.currentActivity)
+    }
+
+    OnUserLeavesActivity {
+      val activity = appContext.currentActivity
+      if (activity != null &&
+        VicallPictureInPictureManager.shouldAutoEnterForLegacy() &&
+        !VicallPictureInPictureManager.isActive(activity)
+      ) {
+        runCatching { VicallPictureInPictureManager.start(activity) }
+      }
+    }
+
+    OnActivityEntersForeground {
+      val active = VicallPictureInPictureManager.isActive(
+        appContext.currentActivity,
+      )
+      VicallPictureInPictureManager.onPictureInPictureModeChanged(active)
     }
 
     AsyncFunction("setup") {
@@ -121,11 +150,62 @@ class ExpoVicallCallManagerModule : Module() {
     AsyncFunction("openFullScreenIntentSettings") {
       openFullScreenIntentSettings(requireContext())
     }
+
+    AsyncFunction("isPictureInPictureSupported") {
+      VicallPictureInPictureManager.isSupported(requireContext())
+    }
+
+    AsyncFunction("isPictureInPictureActive") {
+      VicallPictureInPictureManager.isActive(appContext.currentActivity)
+    }
+
+    AsyncFunction("preparePictureInPicture") {
+      videoViewTag: Int,
+      _: Int?,
+      options: Map<String, Any?>?,
+      ->
+      val activity = requireActivity()
+      val videoView = appContext.findView<android.view.View>(videoViewTag)
+      VicallPictureInPictureManager.prepare(activity, videoView, options)
+    }
+
+    AsyncFunction("setPictureInPictureAutoEnterEnabled") {
+      enabled: Boolean,
+      ->
+      VicallPictureInPictureManager.setAutoEnterEnabled(
+        requireActivity(),
+        enabled,
+      )
+    }
+
+    AsyncFunction("startPictureInPicture") {
+      VicallPictureInPictureManager.start(requireActivity())
+    }
+
+    AsyncFunction("stopPictureInPicture") {
+      VicallPictureInPictureManager.stop(requireActivity())
+    }
+
+    AsyncFunction("disposePictureInPicture") {
+      VicallPictureInPictureManager.dispose(appContext.currentActivity)
+    }
+
+    AsyncFunction("getInitialPictureInPictureEvents") {
+      VicallPictureInPictureEventStore.initialEvents()
+    }
+
+    AsyncFunction("clearInitialPictureInPictureEvents") {
+      VicallPictureInPictureEventStore.clearInitialEvents()
+    }
   }
 
   private fun requireContext(): Context =
     appContext.reactContext?.applicationContext
       ?: throw IllegalStateException("React context is not available")
+
+  private fun requireActivity(): android.app.Activity =
+    appContext.currentActivity
+      ?: throw IllegalStateException("The current Activity is not available")
 
   private fun requireConnection(callId: String): VicallConnection {
     val uuid = runCatching { UUID.fromString(callId) }

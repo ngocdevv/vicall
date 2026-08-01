@@ -1,14 +1,14 @@
 {
   "name": "expo-vicall-call-manager",
-  "version": "0.1.0",
-  "description": "New Architecture Expo module for iOS CallKit/PushKit and Android self-managed ConnectionService",
+  "version": "0.2.0",
+  "description": "Expo module for native VoIP calls and system Picture-in-Picture on iOS and Android",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ngocdevv/vicall.git"
+    "url": "git+https://github.com/ngocdevv/expo-vicall-call-manager.git"
   },
-  "homepage": "https://github.com/ngocdevv/vicall#readme",
+  "homepage": "https://github.com/ngocdevv/expo-vicall-call-manager#readme",
   "bugs": {
-    "url": "https://github.com/ngocdevv/vicall/issues"
+    "url": "https://github.com/ngocdevv/expo-vicall-call-manager/issues"
   },
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -38,6 +38,8 @@
     "callkit",
     "pushkit",
     "connectionservice",
+    "picture-in-picture",
+    "pip",
     "voip"
   ],
   "license": "MIT",
@@ -45,6 +47,7 @@
     "access": "public"
   },
   "peerDependencies": {
+    "@cloudflare/react-native-webrtc": ">=137 <138",
     "expo": ">=56",
     "expo-notifications": ">=56 <57",
     "react": ">=19",
@@ -52,6 +55,7 @@
   },
   "devDependencies": {
     "@expo/config-plugins": "^56.0.0",
+    "@cloudflare/react-native-webrtc": "^137.0.1",
     "eslint": "^9.39.4",
     "eslint-config-universe": "^15.2.0",
     "expo": "^56.0.0",

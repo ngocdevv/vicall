@@ -4,13 +4,14 @@ Native system-call integration for Vicall on Expo SDK 56 and React Native 0.85.
 The module is written with Expo Modules API and targets React Native's New
 Architecture only.
 
-- iOS: CallKit, PushKit, early native event buffering.
+- iOS: CallKit, PushKit, video-call Picture in Picture, early native event buffering.
 - Android: self-managed `ConnectionService`, `CallStyle` notification,
-  full-screen intent, and a `phoneCall` foreground service.
+  full-screen intent, system Picture in Picture, and a `phoneCall` foreground service.
 - Notifications: incoming-call FCM data is intercepted natively; every other
   FCM message is forwarded to `expo-notifications`.
-- Media: deliberately not included. RealtimeKit remains responsible for
-  microphone, camera, and WebRTC media.
+- Media transport remains owned by RealtimeKit. For iOS PiP, this module reads
+  frames from the `@cloudflare/react-native-webrtc` video view and renders them
+  through `AVSampleBufferDisplayLayer`; it does not create another WebRTC session.
 
 CallKit and Android Telecom must be tested on physical devices.
 
@@ -37,6 +38,7 @@ export default {
         {
           appName: "Vicall",
           supportsVideo: true,
+          enablePictureInPicture: true,
           includesCallsInRecents: false,
           maximumCallGroups: 1,
           maximumCallsPerCallGroup: 1,
@@ -232,6 +234,93 @@ On Android 14+, call `canUseFullScreenIntent()` and offer
 `openFullScreenIntentSettings()` when the user has disabled full-screen call
 notifications.
 
+## Video-call Picture in Picture
+
+This package exposes system PiP on iOS 16.4+ and Android 8.0+ when the device reports
+support. Pass the native tag of the remote `RTCView`; on iOS the module attaches
+a second renderer to the same WebRTC track, while Android uses the view bounds
+as its transition source hint.
+
+```tsx
+import type { ComponentRef } from "react";
+import { useEffect, useRef } from "react";
+import { findNodeHandle } from "react-native";
+import { RTCView } from "@cloudflare/react-native-webrtc";
+import CallManager, {
+  type PictureInPictureEvent,
+} from "expo-vicall-call-manager";
+
+export function RemoteVideo({ streamURL }: { streamURL: string }) {
+  const remoteVideoRef = useRef<ComponentRef<typeof RTCView>>(null);
+
+  useEffect(() => {
+    const subscription = CallManager.addListener(
+      "onPictureInPictureEvent",
+      (event: PictureInPictureEvent) => {
+        // Hide controls while Android PiP is active. On iOS, restore the call
+        // route when event.type === "restoreRequested".
+        console.log(event);
+      },
+    );
+    return () => subscription.remove();
+  }, []);
+
+  async function preparePiP() {
+    const remoteTag = findNodeHandle(remoteVideoRef.current);
+    if (remoteTag == null) throw new Error("Remote RTCView is not mounted");
+
+    await CallManager.preparePictureInPicture(remoteTag, null, {
+      aspectRatioWidth: 9,
+      aspectRatioHeight: 16,
+      autoEnterEnabled: true,
+      seamlessResizeEnabled: true,
+    });
+  }
+
+  return (
+    <RTCView
+      ref={remoteVideoRef}
+      streamURL={streamURL}
+      objectFit="cover"
+      style={{ flex: 1 }}
+      onLayout={preparePiP}
+    />
+  );
+}
+```
+
+If the local camera must remain active on iOS while the app is in PiP, pass its
+native `RTCView` tag as the second argument. The module enables multitasking
+camera access when the capture session supports it:
+
+```ts
+await CallManager.preparePictureInPicture(remoteTag, localTag, {
+  autoEnterEnabled: true,
+});
+```
+
+Do not disable the camera or leave RealtimeKit merely because React Native's
+`AppState` changes to `inactive` or `background`; first check
+`isPictureInPictureActive()`. Call `disposePictureInPicture()` when the call
+ends or when replacing the remote track.
+
+Manual controls are also available:
+
+```ts
+if (await CallManager.isPictureInPictureSupported()) {
+  await CallManager.startPictureInPicture();
+}
+
+await CallManager.stopPictureInPicture();
+await CallManager.disposePictureInPicture();
+```
+
+On Android, `stopPictureInPicture()` brings the existing single-task Activity
+back to the foreground because Android has no direct "exit PiP" method. The
+Android PiP window contains the current Activity, so hide every non-video
+control while the `stateChanged` event is active. On iOS, the system video-call
+PiP window is intentionally non-interactive.
+
 ## Public API
 
 | Method | Purpose |
@@ -248,6 +337,12 @@ notifications.
 | `updateCallDisplay(...)` | Updates caller information in the system UI. |
 | `getCalls()` | Returns native calls known to this process. |
 | `getInitialEvents()` | Reads events raised before JS subscribed. |
+| `isPictureInPictureSupported()` / `isPictureInPictureActive()` | Reads native PiP capability and state. |
+| `preparePictureInPicture(remoteTag, localTag, options)` | Connects system PiP to the active WebRTC video view. |
+| `startPictureInPicture()` / `stopPictureInPicture()` | Controls system PiP. |
+| `setPictureInPictureAutoEnterEnabled(enabled)` | Controls automatic entry when leaving the app. |
+| `disposePictureInPicture()` | Detaches the frame renderer and releases native PiP resources. |
+| `getInitialPictureInPictureEvents()` | Reads PiP events raised before JS subscribed. |
 
 ## Integration contract
 
@@ -266,5 +361,5 @@ The module owns system integration only:
 
 Production acceptance tests must include: locked device, app foreground,
 background and terminated, declined call, missed call, answered elsewhere,
-token rotation, offline accept, Bluetooth route changes, and Android OEM
-battery restrictions.
+token rotation, offline accept, Bluetooth route changes, PiP enter/restore/close,
+camera on/off while in PiP, rotation and Android OEM battery restrictions.
