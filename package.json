@@ -1,7 +1,7 @@
 {
   "name": "expo-vicall-call-manager",
-  "version": "0.2.0",
-  "description": "Expo module for native VoIP calls and system Picture-in-Picture on iOS and Android",
+  "version": "0.3.0",
+  "description": "Expo module for native VoIP calls and hybrid video-call presentation on iOS and Android",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ngocdevv/expo-vicall-call-manager.git"
@@ -12,6 +12,17 @@
   },
   "main": "build/index.js",
   "types": "build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    },
+    "./ui": {
+      "types": "./build/ui/index.d.ts",
+      "default": "./build/ui/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "sideEffects": false,
   "files": [
     "src",
@@ -29,6 +40,7 @@
     "build": "expo-module build",
     "clean": "expo-module clean",
     "lint": "expo-module lint",
+    "test": "tsx --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "prepare": "expo-module build"
   },
@@ -40,6 +52,8 @@
     "connectionservice",
     "picture-in-picture",
     "pip",
+    "video-call-ui",
+    "call-overlay",
     "voip"
   ],
   "license": "MIT",
@@ -51,18 +65,36 @@
     "expo": ">=56",
     "expo-notifications": ">=56 <57",
     "react": ">=19",
-    "react-native": ">=0.85"
+    "react-native": ">=0.85",
+    "react-native-gesture-handler": ">=2.31 <3",
+    "react-native-reanimated": ">=4.3 <5",
+    "react-native-safe-area-context": ">=5.7 <6"
+  },
+  "peerDependenciesMeta": {
+    "react-native-gesture-handler": {
+      "optional": true
+    },
+    "react-native-reanimated": {
+      "optional": true
+    },
+    "react-native-safe-area-context": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@expo/config-plugins": "^56.0.0",
     "@cloudflare/react-native-webrtc": "^137.0.1",
+    "@expo/config-plugins": "^56.0.0",
     "eslint": "^9.39.4",
     "eslint-config-universe": "^15.2.0",
     "expo": "^56.0.0",
-    "expo-notifications": "^56.0.22",
     "expo-module-scripts": "^56.0.3",
+    "expo-notifications": "^56.0.22",
     "react": "^19.2.0",
     "react-native": "^0.85.0",
+    "react-native-gesture-handler": "~2.31.1",
+    "react-native-reanimated": "^4.3.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "tsx": "^4.23.5",
     "typescript": "^5.9.2"
   },
   "expo": {

@@ -184,6 +184,14 @@ public final class ExpoVicallCallManagerModule: Module {
       VicallPictureInPictureManager.shared.stop()
     }.runOnQueue(.main)
 
+    AsyncFunction("updatePictureInPictureState") { (state: [String: Any]) in
+      VicallPictureInPictureManager.shared.updateVisualState(state)
+    }.runOnQueue(.main)
+
+    AsyncFunction("completePictureInPictureRestore") { (restored: Bool) in
+      VicallPictureInPictureManager.shared.completeRestore(restored)
+    }.runOnQueue(.main)
+
     AsyncFunction("disposePictureInPicture") {
       VicallPictureInPictureManager.shared.dispose()
     }.runOnQueue(.main)

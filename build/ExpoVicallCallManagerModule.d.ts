@@ -1,5 +1,5 @@
 import { NativeModule } from "expo";
-import type { CallEndReason, CallEvent, ExpoVicallCallManagerEvents, IncomingCall, NativeCall, OutgoingCall, PictureInPictureEvent, PictureInPictureOptions } from "./ExpoVicallCallManager.types";
+import type { CallEndReason, CallEvent, ExpoVicallCallManagerEvents, IncomingCall, NativeCall, OutgoingCall, PictureInPictureEvent, PictureInPictureOptions, PictureInPictureVisualState } from "./ExpoVicallCallManager.types";
 declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallManagerEvents> {
     setup(): Promise<void>;
     displayIncomingCall(call: IncomingCall): Promise<void>;
@@ -26,6 +26,8 @@ declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallMan
     setPictureInPictureAutoEnterEnabled(enabled: boolean): Promise<void>;
     startPictureInPicture(): Promise<void>;
     stopPictureInPicture(): Promise<void>;
+    updatePictureInPictureState(state: PictureInPictureVisualState): Promise<void>;
+    completePictureInPictureRestore(restored: boolean): Promise<void>;
     disposePictureInPicture(): Promise<void>;
     getInitialPictureInPictureEvents(): Promise<PictureInPictureEvent[]>;
     clearInitialPictureInPictureEvents(): Promise<void>;

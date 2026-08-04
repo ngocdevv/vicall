@@ -186,6 +186,20 @@ class ExpoVicallCallManagerModule : Module() {
       VicallPictureInPictureManager.stop(requireActivity())
     }
 
+    AsyncFunction("updatePictureInPictureState") {
+      _: Map<String, Any?>,
+      ->
+      // Android PiP displays the React Activity. CallOverlayHost renders these
+      // indicators before and while the Activity is in PiP mode.
+    }
+
+    AsyncFunction("completePictureInPictureRestore") {
+      _: Boolean,
+      ->
+      // Android restores its Activity directly and has no asynchronous
+      // AVPictureInPictureController-style restore completion callback.
+    }
+
     AsyncFunction("disposePictureInPicture") {
       VicallPictureInPictureManager.dispose(appContext.currentActivity)
     }

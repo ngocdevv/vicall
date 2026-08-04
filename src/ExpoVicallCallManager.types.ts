@@ -107,6 +107,13 @@ export interface PictureInPictureEvent {
   error?: string;
 }
 
+export interface PictureInPictureVisualState {
+  displayName?: string;
+  localMuted?: boolean;
+  remoteMuted?: boolean;
+  remoteCameraEnabled?: boolean;
+}
+
 export interface ExpoVicallCallManagerEvents {
   [event: string]: (...args: any[]) => void;
   onCallEvent(event: CallEvent): void;

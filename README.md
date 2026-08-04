@@ -20,7 +20,7 @@ CallKit and Android Telecom must be tested on physical devices.
 In the mobile application:
 
 ```sh
-npx expo install expo-notifications
+npx expo install expo-notifications react-native-gesture-handler react-native-reanimated react-native-safe-area-context
 npm install expo-vicall-call-manager
 ```
 
@@ -234,6 +234,131 @@ On Android 14+, call `canUseFullScreenIntent()` and offer
 `openFullScreenIntentSettings()` when the user has disabled full-screen call
 notifications.
 
+## Hybrid video-call presentation
+
+The optional `expo-vicall-call-manager/ui` entry point provides the complete
+presentation layer used around the RealtimeKit video views:
+
+- Fullscreen call UI with auto-hiding controls and a swipe-down minimize gesture.
+- A draggable local preview that snaps to the nearest safe-area corner.
+- iOS: swipe-down enters native system PiP immediately, including while the app
+  remains foreground. The same PiP continues over Home and other apps.
+- Android: swipe-down first becomes a draggable in-app mini-player. Leaving the
+  app then hands the existing Activity to Android system PiP.
+- The Android in-app mini-player snaps to a corner and can be stashed at either
+  screen edge; tapping its visible tab restores it.
+- System PiP restoration is acknowledged only after the fullscreen React layout
+  is ready, avoiding a blank transition back into the app.
+
+Mount the provider and overlay host once near the application root. In an Expo
+Router app, place this inside the existing theme provider in `routes/_layout.tsx`
+so any application components rendered by the call UI retain their theme context.
+
+```tsx
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  CallOverlayHost,
+  CallPresentationProvider,
+  type HybridCallSession,
+} from "expo-vicall-call-manager/ui";
+
+export function Root({ callSession }: { callSession: HybridCallSession | null }) {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <CallPresentationProvider
+          session={callSession}
+          onError={(error) => console.warn("Call presentation failed", error)}
+        >
+          <AppNavigation />
+          <CallOverlayHost />
+        </CallPresentationProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}
+```
+
+Build the controlled session from the current RealtimeKit state. Keep both
+`RTCView` elements and their refs stable for the lifetime of the call; the host
+morphs the same remote surface between layouts instead of reparenting it.
+
+```tsx
+import type { ComponentRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
+import { findNodeHandle } from "react-native";
+import { RTCView } from "@cloudflare/react-native-webrtc";
+import type { HybridCallSession } from "expo-vicall-call-manager/ui";
+
+export function useHybridCallSession(): HybridCallSession {
+  const remoteRef = useRef<ComponentRef<typeof RTCView>>(null);
+  const localRef = useRef<ComponentRef<typeof RTCView>>(null);
+
+  const getRemoteViewTag = useCallback(
+    () => findNodeHandle(remoteRef.current),
+    [],
+  );
+  const getLocalViewTag = useCallback(
+    () => findNodeHandle(localRef.current),
+    [],
+  );
+
+  const remoteVideo = useMemo(
+    () => (
+      <RTCView
+        ref={remoteRef}
+        objectFit="cover"
+        streamURL={remoteStreamURL}
+        style={{ flex: 1 }}
+      />
+    ),
+    [remoteStreamURL],
+  );
+
+  const localVideo = useMemo(
+    () => (
+      <RTCView
+        ref={localRef}
+        mirror
+        objectFit="cover"
+        streamURL={localStreamURL}
+        style={{ flex: 1 }}
+      />
+    ),
+    [localStreamURL],
+  );
+
+  return {
+    callId,
+    displayName,
+    connectionState: connected ? "connected" : "connecting",
+    remoteVideo,
+    localVideo,
+    localMuted,
+    remoteMuted,
+    localCameraEnabled,
+    remoteCameraEnabled,
+    pictureInPicture: {
+      getRemoteViewTag,
+      getLocalViewTag,
+      // Increment only when RealtimeKit replaces the underlying remote track.
+      revision: remoteTrackRevision,
+    },
+    onToggleMicrophone: toggleMicrophone,
+    onToggleCamera: toggleCamera,
+    onSwitchCamera: switchCamera,
+    onEndCall: endCall,
+  };
+}
+```
+
+Set the provider's `session` to `null` after the call ends. Do not unmount the
+remote view, stop camera capture, or leave RealtimeKit solely because `AppState`
+becomes inactive/background while system PiP is active. Use `renderControlIcon`
+and `theme` to replace the default controls without forking the presentation
+state machine.
+
 ## Video-call Picture in Picture
 
 This package exposes system PiP on iOS 16.4+ and Android 8.0+ when the device reports
@@ -341,8 +466,16 @@ PiP window is intentionally non-interactive.
 | `preparePictureInPicture(remoteTag, localTag, options)` | Connects system PiP to the active WebRTC video view. |
 | `startPictureInPicture()` / `stopPictureInPicture()` | Controls system PiP. |
 | `setPictureInPictureAutoEnterEnabled(enabled)` | Controls automatic entry when leaving the app. |
+| `updatePictureInPictureState(state)` | Updates native PiP camera/mute badges and display fallback. |
+| `completePictureInPictureRestore(restored)` | Completes iOS restoration after the React call layout is ready. |
 | `disposePictureInPicture()` | Detaches the frame renderer and releases native PiP resources. |
 | `getInitialPictureInPictureEvents()` | Reads PiP events raised before JS subscribed. |
+
+The `expo-vicall-call-manager/ui` entry point exports
+`CallPresentationProvider`, `CallOverlayHost`, `useCallPresentation`, the
+default theme, and all Hybrid presentation types. Its peer UI dependencies are
+optional only for applications using the low-level native API; install them
+when importing this entry point.
 
 ## Integration contract
 
