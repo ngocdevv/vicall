@@ -133,7 +133,7 @@ struct VicallCallDescriptor {
         ?? dictionary["callerName"] as? String
         ?? handle,
       handleType: handleType,
-      hasVideo: dictionary["hasVideo"] as? Bool ?? false,
+      hasVideo: boolValue(dictionary["hasVideo"]),
       metadata: dictionary["metadata"] as? [String: Any] ?? [:],
       direction: direction
     )
@@ -148,6 +148,20 @@ struct VicallCallDescriptor {
       "hasVideo": hasVideo,
       "metadata": metadata
     ]
+  }
+}
+
+private func boolValue(_ value: Any?) -> Bool {
+  switch value {
+  case let bool as Bool:
+    return bool
+  case let number as NSNumber:
+    return number.boolValue
+  case let string as String:
+    let normalized = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return normalized == "true" || normalized == "1" || normalized == "yes"
+  default:
+    return false
   }
 }
 

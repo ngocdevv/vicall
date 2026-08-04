@@ -50,7 +50,7 @@ internal data class VicallCallDescriptor(
   }
 
   fun eventFields(): Map<String, Any?> = mapOf(
-    "callId" to callId.toString(),
+    "callId" to callId.toString().lowercase(),
     "direction" to direction.value,
     "handle" to handle,
     "displayName" to displayName,

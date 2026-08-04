@@ -2,7 +2,6 @@ package expo.modules.vicallcallmanager
 
 import android.content.ComponentName
 import android.content.Context
-import android.os.Bundle
 import android.telecom.PhoneAccount
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
@@ -35,6 +34,20 @@ internal object VicallTelecomManager {
     context: Context,
     descriptor: VicallCallDescriptor,
   ) {
+    // Dedupe retries for the same call identity.
+    if (VicallCallRegistry.get(descriptor.callId) != null) {
+      VicallCallEventStore.emit(
+        "incomingCallDisplayed",
+        descriptor.eventFields(),
+      )
+      return
+    }
+
+    // Cancel already arrived and was emitted; suppress the UI only.
+    if (VicallPendingCancellationStore.consume(descriptor.callId) != null) {
+      return
+    }
+
     setup(context)
     val extras = descriptor.toBundle().apply {
       putParcelable(
@@ -60,6 +73,10 @@ internal object VicallTelecomManager {
     context: Context,
     descriptor: VicallCallDescriptor,
   ) {
+    if (VicallCallRegistry.get(descriptor.callId) != null) {
+      return
+    }
+
     setup(context)
     val extras = descriptor.toBundle().apply {
       putParcelable(

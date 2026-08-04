@@ -21,6 +21,15 @@ final class VicallCallKitManager: NSObject {
     descriptor: VicallCallDescriptor,
     completion: ((Error?) -> Void)? = nil
   ) {
+    if hasActiveCall(descriptor.callId) {
+      VicallCallEventStore.shared.emit(
+        type: "incomingCallDisplayed",
+        fields: descriptor.eventFields
+      )
+      completion?(nil)
+      return
+    }
+
     remember(descriptor)
 
     let update = CXCallUpdate()
@@ -57,6 +66,9 @@ final class VicallCallKitManager: NSObject {
   }
 
   func startCall(_ descriptor: VicallCallDescriptor) {
+    if hasActiveCall(descriptor.callId) {
+      return
+    }
     remember(descriptor)
     let handle = CXHandle(
       type: descriptor.handleType,
@@ -186,9 +198,12 @@ final class VicallCallKitManager: NSObject {
   }
 
   private func request(_ transaction: CXTransaction, callId: UUID) {
-    callController.request(transaction) { error in
+    callController.request(transaction) { [weak self] error in
       guard let error else {
         return
+      }
+      if transaction.actions.contains(where: { $0 is CXStartCallAction }) {
+        self?.forget(callId)
       }
       VicallCallEventStore.shared.emit(
         type: "incomingCallFailed",
@@ -222,6 +237,15 @@ final class VicallCallKitManager: NSObject {
     descriptor(for: callId)?.eventFields ?? [
       "callId": callId.uuidString.lowercased()
     ]
+  }
+
+  private func hasActiveCall(_ callId: UUID) -> Bool {
+    if descriptor(for: callId) != nil {
+      return true
+    }
+    return callController.callObserver.calls.contains { call in
+      call.uuid == callId && !call.hasEnded
+    }
   }
 }
 

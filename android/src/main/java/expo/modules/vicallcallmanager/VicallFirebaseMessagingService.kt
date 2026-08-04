@@ -45,7 +45,7 @@ private class VicallFirebaseMessagingDelegate(
       VicallCallEventStore.emit(
         "incomingCallFailed",
         mapOf(
-          "callId" to data["callId"],
+          "callId" to data["callId"]?.lowercase(),
           "reason" to (
             error.message ?: "Invalid incoming-call FCM payload"
             ),
@@ -58,9 +58,20 @@ private class VicallFirebaseMessagingDelegate(
     val callId = data["callId"]
       ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
       ?: return
-    val connection = VicallCallRegistry.get(callId) ?: return
-    connection.endFromApp(
-      VicallCallEndReason.from(data["reason"] ?: "remoteEnded"),
+    val reason = VicallCallEndReason.from(data["reason"] ?: "remoteEnded")
+    val connection = VicallCallRegistry.get(callId)
+    if (connection != null) {
+      connection.endFromApp(reason)
+      return
+    }
+    // Buffer briefly so a late Telecom connection creation still ends cleanly.
+    VicallPendingCancellationStore.remember(callId, reason)
+    VicallCallEventStore.emit(
+      "end",
+      mapOf(
+        "callId" to callId.toString().lowercase(),
+        "reason" to reason.value,
+      ),
     )
   }
 

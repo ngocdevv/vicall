@@ -18,13 +18,15 @@ class VicallCallForegroundService : Service() {
   ): Int {
     val callId = intent?.getStringExtra(EXTRA_CALL_ID)
       ?.let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
-    val descriptor = callId?.let { VicallCallRegistry.get(it)?.descriptor }
+    val connection = callId?.let { VicallCallRegistry.get(it) }
+    val descriptor = connection?.descriptor
 
     if (descriptor == null) {
       stopSelf()
       return START_NOT_STICKY
     }
 
+    val muted = intent?.getBooleanExtra(EXTRA_MUTED, false) == true
     val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
     } else {
@@ -33,19 +35,23 @@ class VicallCallForegroundService : Service() {
     ServiceCompat.startForeground(
       this,
       VicallCallNotification.notificationId(descriptor.callId),
-      VicallCallNotification.ongoingNotification(this, descriptor),
+      VicallCallNotification.ongoingNotification(this, descriptor, muted),
       serviceType,
     )
     return START_NOT_STICKY
   }
 
   companion object {
+    private const val EXTRA_MUTED = "expo.modules.vicallcallmanager.MUTED"
+
     internal fun start(
       context: Context,
       descriptor: VicallCallDescriptor,
+      muted: Boolean = false,
     ) {
       val intent = Intent(context, VicallCallForegroundService::class.java)
         .putExtra(EXTRA_CALL_ID, descriptor.callId.toString())
+        .putExtra(EXTRA_MUTED, muted)
       runCatching {
         androidx.core.content.ContextCompat.startForegroundService(
           context,
@@ -56,7 +62,7 @@ class VicallCallForegroundService : Service() {
           "incomingCallFailed",
           descriptor.eventFields() + (
             "reason" to "Unable to start call foreground service: ${it.message}"
-          ),
+            ),
         )
       }
     }

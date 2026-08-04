@@ -1,8 +1,8 @@
 Pod::Spec.new do |s|
   s.name           = 'ExpoVicallCallManager'
-  s.version        = '0.3.0'
-  s.summary        = 'Native VoIP lifecycle and hybrid video-call presentation for Expo'
-  s.description    = 'An Expo Modules API bridge for CallKit, PushKit, Android Telecom, system Picture in Picture, and optional hybrid call UI.'
+  s.version        = '0.5.1'
+  s.summary        = 'System-call engine for Expo audio/video calls (host-owned UI)'
+  s.description    = 'CallKit, PushKit, Android Telecom, VoIP/FCM contracts, and optional system PiP APIs. Integrating apps own in-call product UI and media.'
   s.author         = 'Vicall'
   s.homepage       = 'https://github.com/ngocdevv/expo-vicall-call-manager'
   s.license        = { :type => 'MIT', :file => '../LICENSE' }
@@ -11,6 +11,8 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
+  # @cloudflare/react-native-webrtc still publishes the CocoaPod name
+  # "react-native-webrtc" and pulls RTKWebRTC (imported by PiP renderers).
   s.dependency 'react-native-webrtc'
   s.frameworks = 'AVFoundation', 'AVKit', 'CallKit', 'CoreImage', 'PushKit'
 

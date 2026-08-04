@@ -41,6 +41,7 @@ internal object VicallCallNotification {
   fun ongoingNotification(
     context: Context,
     descriptor: VicallCallDescriptor,
+    muted: Boolean = false,
   ): Notification {
     createChannel(context)
     val person = Person.Builder()
@@ -48,8 +49,13 @@ internal object VicallCallNotification {
       .setImportant(true)
       .build()
     val hangupIntent = actionIntent(context, descriptor.callId, ACTION_END, 3)
+    val contentText = buildString {
+      append(if (descriptor.hasVideo) "Ongoing video call" else "Ongoing call")
+      if (muted) append(" · Muted")
+    }
 
     return baseBuilder(context, descriptor)
+      .setContentText(contentText)
       .setOngoing(true)
       .setStyle(
         NotificationCompat.CallStyle.forOngoingCall(person, hangupIntent)

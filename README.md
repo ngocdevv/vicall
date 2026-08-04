@@ -1,29 +1,43 @@
 # expo-vicall-call-manager
 
-Native system-call integration for Vicall on Expo SDK 56 and React Native 0.85.
-The module is written with Expo Modules API and targets React Native's New
-Architecture only.
+Native **system-call** engine for audio/video calls on Expo SDK 56 and React Native 0.85
+(New Architecture only).
 
-- iOS: CallKit, PushKit, video-call Picture in Picture, early native event buffering.
+Designed like large social clients (e.g. X): this module owns **OS call UX**
+(CallKit / Telecom / VoIP wake-ups). **Your app owns the in-call UI** and media
+SDK. It does not force a product call screen.
+
+- iOS: CallKit, PushKit, optional system PiP APIs, early native event buffering.
 - Android: self-managed `ConnectionService`, `CallStyle` notification,
-  full-screen intent, system Picture in Picture, and a `phoneCall` foreground service.
+  full-screen intent, optional system PiP APIs, `phoneCall` foreground service.
 - Notifications: incoming-call FCM data is intercepted natively; every other
   FCM message is forwarded to `expo-notifications`.
-- Media transport remains owned by RealtimeKit. For system PiP, this module
-  attaches a second native renderer to the existing
-  `@cloudflare/react-native-webrtc` video track; it does not create another
-  WebRTC session.
+- Service protocol + lifecycle helpers so backends and RN hosts share one contract.
+
+**Architecture (X-style split):** [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)  
+**Service ↔ RN contract:** [docs/SERVICE_INTEGRATION.md](./docs/SERVICE_INTEGRATION.md)
 
 CallKit and Android Telecom must be tested on physical devices.
 
+## Package entry points
+
+| Import | Purpose |
+| --- | --- |
+| `expo-vicall-call-manager` | **Core**: native module + protocol + lifecycle/session helpers |
+| `expo-vicall-call-manager/protocol` | Backend-safe payload builders/parsers (no native) |
+| `expo-vicall-call-manager/client` | RN bootstrap, router, social session, controller |
+
 ## Install
 
-In the mobile application:
+Core system-call integration (recommended for product apps that own UI):
 
 ```sh
-npx expo install expo-notifications react-native-gesture-handler react-native-reanimated react-native-safe-area-context
+npx expo install expo-notifications
 npm install expo-vicall-call-manager
 ```
+
+WebRTC is optional for the core bridge; install `@cloudflare/react-native-webrtc`
+when you bind tracks or use system PiP APIs.
 
 Add the plugin after `expo-notifications`:
 
@@ -65,42 +79,122 @@ npx expo run:ios --device
 npx expo run:android --device
 ```
 
-## Initialize
+## Initialize (React Native host — X-style)
 
-Register the event listener before reading early events. Events received while
-the JS runtime was unavailable remain in memory until `clearInitialEvents()` is
-called.
+The host app owns in-call screens. The module only drives system call UX and
+emits lifecycle events:
 
 ```ts
-import CallManager, {
-  type CallEvent,
+import {
+  initializeNativeCalls,
+  createSocialCallSession,
+  NativeCallController,
 } from "expo-vicall-call-manager";
 
-export async function initializeNativeCalls(
-  handleEvent: (event: CallEvent) => Promise<void> | void,
-) {
-  await CallManager.setup();
+const session = createSocialCallSession({
+  media: {
+    async accept(callId) {
+      const credentials = await acceptCallOnWorker(callId);
+      await joinRealtimeKit(credentials);
+    },
+    async end(callId) {
+      await leaveRealtimeKit();
+      await endCallOnWorker(callId);
+    },
+    async setMicrophoneEnabled(enabled) {
+      await setRealtimeKitMicrophoneEnabled(enabled);
+    },
+    async setHeld(held) {
+      await setRealtimeKitAudioEnabled(!held);
+    },
+    async onVoipTokenUpdated(token) {
+      await registerVoipToken(token);
+    },
+  },
+  ui: {
+    presentInCallUi(callId, _event, state) {
+      // YOUR screen — audio or video based on state.hasVideo
+      navigation.navigate("CallScreen", {
+        callId,
+        hasVideo: state.hasVideo,
+        displayName: state.displayName,
+      });
+    },
+    dismissInCallUi() {
+      navigation.navigate("Home");
+    },
+  },
+  setCallActive: (callId) => NativeCallController.setCallActive(callId),
+});
 
-  const subscription = CallManager.addListener(
-    "onCallEvent",
-    handleEvent,
-  );
+const subscription = await initializeNativeCalls((event) =>
+  session.handleEvent(event),
+);
+// later: subscription.remove();
+```
 
-  const initialEvents = await CallManager.getInitialEvents();
-  for (const event of initialEvents) {
-    await handleEvent(event);
+Lower-level alternative (manual event routing):
+
+```ts
+import {
+  initializeNativeCalls,
+  createNativeCallEventRouter,
+  NativeCallController,
+  reduceCallLifecycle,
+  createInitialCallLifecycleState,
+} from "expo-vicall-call-manager";
+
+let lifecycle = createInitialCallLifecycleState();
+const handleEvent = createNativeCallEventRouter({
+  media: {
+    async accept(callId) {
+      const credentials = await acceptCallOnWorker(callId);
+      await joinRealtimeKit(credentials);
+    },
+    async end(callId) {
+      await leaveRealtimeKit();
+      await endCallOnWorker(callId);
+    },
+    async setMicrophoneEnabled(enabled) {
+      await setRealtimeKitMicrophoneEnabled(enabled);
+    },
+    async setHeld(held) {
+      await setRealtimeKitAudioEnabled(!held);
+    },
+    async onVoipTokenUpdated(token) {
+      await registerVoipToken(token);
+    },
+  },
+  setCallActive: (callId) => NativeCallController.setCallActive(callId),
+});
+
+const subscription = await initializeNativeCalls(async (event) => {
+  lifecycle = reduceCallLifecycle(lifecycle, event);
+  if (lifecycle.shouldPresentAppCallUi) {
+    // open YOUR call UI
   }
-  await CallManager.clearInitialEvents();
+  await handleEvent(event);
+});
+```
 
-  return () => subscription.remove();
+Equivalent manual bootstrap (must preserve order):
+
+```ts
+import CallManager from "expo-vicall-call-manager";
+
+await CallManager.setup();
+const subscription = CallManager.addListener("onCallEvent", handleEvent);
+for (const event of await CallManager.getInitialEvents()) {
+  await handleEvent(event);
 }
+await CallManager.clearInitialEvents();
 ```
 
 Use the same RFC 4122 UUID for the Supabase `calls.id`, native call UI,
 Cloudflare Worker signaling, and the RealtimeKit meeting mapping.
 
 ```ts
-await CallManager.startCall({
+await NativeCallController.startCall({
   callId,
   handle: calleeUserId,
   displayName: calleeDisplayName,
@@ -111,36 +205,46 @@ await CallManager.startCall({
 });
 ```
 
-Typical event handling:
+## Backend / service payloads
+
+Share validators with the mobile app:
 
 ```ts
-async function handleCallEvent(event: CallEvent) {
-  switch (event.type) {
-    case "answer": {
-      // Ask Worker to atomically validate the still-ringing call and mint a
-      // short-lived RealtimeKit participant token.
-      const credentials = await acceptCallOnWorker(event.callId!);
-      await joinRealtimeKit(credentials);
-      await CallManager.setCallActive(event.callId!);
-      break;
-    }
-    case "mute":
-      await setRealtimeKitMicrophoneEnabled(!event.muted);
-      break;
-    case "hold":
-      await setRealtimeKitAudioEnabled(!event.held);
-      break;
-    case "end":
-      await leaveRealtimeKit();
-      await endCallOnWorker(event.callId!);
-      break;
-  }
-}
+import {
+  buildAndroidIncomingCallFcmData,
+  buildAndroidCancelCallFcmData,
+  buildIosVoipPushPayload,
+  parseAndroidIncomingCallData,
+  validateCallId,
+} from "expo-vicall-call-manager/protocol";
+
+validateCallId(callId);
+
+const iosBody = buildIosVoipPushPayload({
+  callId,
+  handle: callerUserId,
+  displayName: callerName,
+  hasVideo: true,
+  metadata: { conversationId },
+});
+
+const androidData = buildAndroidIncomingCallFcmData({
+  callId,
+  handle: callerUserId,
+  displayName: callerName,
+  hasVideo: true,
+  metadata: { conversationId },
+});
+
+const cancelData = buildAndroidCancelCallFcmData(callId, "answeredElsewhere");
 ```
 
-Do not place a RealtimeKit participant token, Supabase JWT, or R2 URL in a push
-payload. The app must fetch short-lived media credentials from Worker after the
-user accepts.
+Never put RealtimeKit participant tokens, Supabase JWTs, or media URLs in push
+payloads. The app must fetch short-lived media credentials from the Worker after
+the user accepts.
+
+See [docs/SERVICE_INTEGRATION.md](./docs/SERVICE_INTEGRATION.md) for the full
+ownership matrix, sequence diagram, and event catalog.
 
 ## iOS VoIP push
 
@@ -234,138 +338,6 @@ On Android 13+, request notification permission through `expo-notifications`.
 On Android 14+, call `canUseFullScreenIntent()` and offer
 `openFullScreenIntentSettings()` when the user has disabled full-screen call
 notifications.
-
-## Hybrid video-call presentation
-
-The optional `expo-vicall-call-manager/ui` entry point provides the complete
-presentation layer used around the RealtimeKit video views:
-
-- Fullscreen call UI with auto-hiding controls and a swipe-down minimize gesture.
-- A draggable local preview that snaps to the nearest safe-area corner.
-- iOS: swipe-down enters native system PiP immediately, including while the app
-  remains foreground. The same PiP continues over Home and other apps.
-- Android: swipe-down first becomes a draggable in-app mini-player. Leaving the
-  app then hands the existing Activity to Android system PiP.
-- The Android in-app mini-player snaps to a corner and can be stashed at either
-  screen edge; tapping its visible tab restores it.
-- The in-app mini-player stays above the software keyboard and returns to its
-  resting corner when the keyboard closes.
-- Android system PiP renders the existing RealtimeKit track through a dedicated
-  native surface, so React navigation, chat content, and the keyboard cannot
-  leak into the PiP window. A React surface handoff remains as a compatibility
-  fallback when a native track is not available.
-- System PiP restoration is acknowledged only after the fullscreen React layout
-  is ready, avoiding a blank transition back into the app.
-
-Mount the provider and overlay host once near the application root. In an Expo
-Router app, place this inside the existing theme provider in `routes/_layout.tsx`
-so any application components rendered by the call UI retain their theme context.
-
-```tsx
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
-import {
-  CallOverlayHost,
-  CallPresentationProvider,
-  type HybridCallSession,
-} from "expo-vicall-call-manager/ui";
-
-export function Root({ callSession }: { callSession: HybridCallSession | null }) {
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <CallPresentationProvider
-          session={callSession}
-          onError={(error) => console.warn("Call presentation failed", error)}
-        >
-          <AppNavigation />
-          <CallOverlayHost />
-        </CallPresentationProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
-  );
-}
-```
-
-Build the controlled session from the current RealtimeKit state. Keep both
-`RTCView` elements and their refs stable for the lifetime of the call; the host
-morphs the same remote surface between layouts instead of reparenting it.
-
-```tsx
-import type { ComponentRef } from "react";
-import { useCallback, useMemo, useRef } from "react";
-import { findNodeHandle } from "react-native";
-import { RTCView } from "@cloudflare/react-native-webrtc";
-import type { HybridCallSession } from "expo-vicall-call-manager/ui";
-
-export function useHybridCallSession(): HybridCallSession {
-  const remoteRef = useRef<ComponentRef<typeof RTCView>>(null);
-  const localRef = useRef<ComponentRef<typeof RTCView>>(null);
-
-  const getRemoteViewTag = useCallback(
-    () => findNodeHandle(remoteRef.current),
-    [],
-  );
-  const getLocalViewTag = useCallback(
-    () => findNodeHandle(localRef.current),
-    [],
-  );
-
-  const remoteVideo = useMemo(
-    () => (
-      <RTCView
-        ref={remoteRef}
-        objectFit="cover"
-        streamURL={remoteStreamURL}
-        style={{ flex: 1 }}
-      />
-    ),
-    [remoteStreamURL],
-  );
-
-  const localVideo = useMemo(
-    () => (
-      <RTCView
-        ref={localRef}
-        mirror
-        objectFit="cover"
-        streamURL={localStreamURL}
-        style={{ flex: 1 }}
-      />
-    ),
-    [localStreamURL],
-  );
-
-  return {
-    callId,
-    displayName,
-    connectionState: connected ? "connected" : "connecting",
-    remoteVideo,
-    localVideo,
-    localMuted,
-    remoteMuted,
-    localCameraEnabled,
-    remoteCameraEnabled,
-    pictureInPicture: {
-      getRemoteViewTag,
-      getLocalViewTag,
-      // Increment whenever RealtimeKit replaces the underlying remote track.
-      // The provider refreshes it even while native system PiP is active.
-      revision: remoteTrackRevision,
-    },
-    onToggleMicrophone: toggleMicrophone,
-    onToggleCamera: toggleCamera,
-    onSwitchCamera: switchCamera,
-    onEndCall: endCall,
-  };
-}
-```
-
-Set the provider's `session` to `null` after the call ends. Do not unmount the
-remote view, stop camera capture, or leave RealtimeKit solely because `AppState`
-becomes inactive/background while system PiP is active. Use `renderControlIcon`
-and `theme` to replace the default controls without forking the presentation
-state machine.
 
 ## Video-call Picture in Picture
 
@@ -461,6 +433,18 @@ non-interactive.
 
 ## Public API
 
+### RN host helpers
+
+| API | Purpose |
+| --- | --- |
+| `initializeNativeCalls(onEvent \| options)` | Correct cold-start bootstrap: setup → listen → drain buffer → clear |
+| `createCallEventRouter({ media, setCallActive })` | Pure router from native events → media callbacks (testable) |
+| `createNativeCallEventRouter({ media })` | Same router with default `CallManager.setCallActive` |
+| `NativeCallController.*` | Imperative native call UI helpers without platform branching |
+| Protocol builders/parsers | `buildIosVoipPushPayload`, `buildAndroidIncomingCallFcmData`, `parse*`, `validateCallId` |
+
+### Native module methods
+
 | Method | Purpose |
 | --- | --- |
 | `setup()` | Initializes CallKit or registers the self-managed phone account. |
@@ -485,11 +469,7 @@ non-interactive.
 | `disposePictureInPicture()` | Detaches the frame renderer and releases native PiP resources. |
 | `getInitialPictureInPictureEvents()` | Reads PiP events raised before JS subscribed. |
 
-The `expo-vicall-call-manager/ui` entry point exports
-`CallPresentationProvider`, `CallOverlayHost`, `useCallPresentation`, the
-default theme, and all Hybrid presentation types. Its peer UI dependencies are
-optional only for applications using the low-level native API; install them
-when importing this entry point.
+Full backend/service contract: [docs/SERVICE_INTEGRATION.md](./docs/SERVICE_INTEGRATION.md).
 
 ## Integration contract
 

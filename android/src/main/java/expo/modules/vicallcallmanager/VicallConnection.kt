@@ -98,6 +98,7 @@ internal class VicallConnection(
     )
     if (state.isMuted != muted) {
       muted = state.isMuted
+      refreshOngoingNotification()
       emit("mute", mapOf("muted" to muted))
     }
   }
@@ -131,6 +132,9 @@ internal class VicallConnection(
   fun setMutedFromApp(shouldMute: Boolean) {
     if (muted == shouldMute) return
     muted = shouldMute
+    // Self-managed Telecom does not expose Connection.setMuted; keep local
+    // state, refresh the ongoing notification, and command the media layer.
+    refreshOngoingNotification()
     emit("mute", mapOf("muted" to muted))
   }
 
@@ -143,7 +147,7 @@ internal class VicallConnection(
     answered = true
     setActive()
     VicallCallNotification.cancel(context, descriptor.callId)
-    VicallCallForegroundService.start(context, descriptor)
+    VicallCallForegroundService.start(context, descriptor, muted)
   }
 
   fun updateDisplay(
@@ -168,6 +172,7 @@ internal class VicallConnection(
         VideoProfile.STATE_AUDIO_ONLY
       },
     )
+    refreshOngoingNotification()
   }
 
   fun snapshot(): Map<String, Any?> = descriptor.eventFields() + mapOf(
@@ -178,6 +183,7 @@ internal class VicallConnection(
       descriptor.direction == VicallCallDirection.INCOMING -> "ringing"
       else -> "dialing"
     },
+    "muted" to muted,
   )
 
   private fun answer() {
@@ -185,7 +191,7 @@ internal class VicallConnection(
     answered = true
     setActive()
     VicallCallNotification.cancel(context, descriptor.callId)
-    VicallCallForegroundService.start(context, descriptor)
+    VicallCallForegroundService.start(context, descriptor, muted)
     emit("answer")
     VicallCallRegistry.launchApplication(context, descriptor.callId)
   }
@@ -201,10 +207,16 @@ internal class VicallConnection(
     destroy()
     VicallCallNotification.cancel(context, descriptor.callId)
     VicallCallRegistry.remove(descriptor.callId)
+    VicallPendingCancellationStore.consume(descriptor.callId)
     if (VicallCallRegistry.isEmpty()) {
       VicallCallForegroundService.stop(context)
     }
     emit(eventType, reason?.let { mapOf("reason" to it) } ?: emptyMap())
+  }
+
+  private fun refreshOngoingNotification() {
+    if (!answered || finished) return
+    VicallCallForegroundService.start(context, descriptor, muted)
   }
 
   private fun emit(

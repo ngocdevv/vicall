@@ -46,13 +46,26 @@ class VicallConnectionService : ConnectionService() {
   private fun createConnection(
     descriptor: VicallCallDescriptor,
     incoming: Boolean,
-  ): VicallConnection {
+  ): Connection {
+    // Cancel was already buffered + emitted; refuse the connection silently.
+    if (VicallPendingCancellationStore.consume(descriptor.callId) != null) {
+      return Connection.createFailedConnection(
+        DisconnectCause(DisconnectCause.CANCELED, "cancelled"),
+      )
+    }
+
+    // Dedupe if the same callId already has a live connection.
+    VicallCallRegistry.get(descriptor.callId)?.let { existing ->
+      return existing
+    }
+
     return VicallConnection(this, descriptor).also { connection ->
       VicallCallRegistry.put(connection)
       if (incoming) {
         connection.setRinging()
       } else {
         connection.setDialing()
+        VicallCallEventStore.emit("start", descriptor.eventFields())
       }
     }
   }
