@@ -47,12 +47,20 @@ final class VicallSampleBufferVideoView: UIView, RTKRTCVideoRenderer {
   private var renderingFrame = false
   private var pixelBufferPool: CVPixelBufferPool?
   private var poolSize = CGSize.zero
+  private var firstFrameTimestampNs: Int64?
+  private var lastPresentationTime = CMTime.invalid
+  // Stored as AnyObject so this view can still deploy to iOS 16. The concrete
+  // AVSampleBufferVideoRenderer type is guarded at every use by iOS 17 checks.
+  private var videoRenderer: AnyObject?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
     backgroundColor = .black
     sampleBufferDisplayLayer.backgroundColor = UIColor.black.cgColor
     sampleBufferDisplayLayer.videoGravity = .resizeAspectFill
+    if #available(iOS 17.0, *) {
+      videoRenderer = sampleBufferDisplayLayer.sampleBufferRenderer
+    }
   }
 
   @available(*, unavailable)
@@ -75,20 +83,32 @@ final class VicallSampleBufferVideoView: UIView, RTKRTCVideoRenderer {
               sourceBuffer,
               rotation: frame.rotation
             ),
-            let sampleBuffer = self.sampleBuffer(from: displayBuffer) else {
+            let sampleBuffer = self.sampleBuffer(
+              from: displayBuffer,
+              timestampNs: frame.timeStampNs
+            ) else {
         return
       }
 
-      if self.sampleBufferDisplayLayer.status == .failed {
-        self.sampleBufferDisplayLayer.flush()
-      }
-      self.sampleBufferDisplayLayer.enqueue(sampleBuffer)
+      self.enqueue(sampleBuffer)
     }
   }
 
   func flush() {
     renderQueue.async { [weak self] in
-      self?.sampleBufferDisplayLayer.flushAndRemoveImage()
+      guard let self else {
+        return
+      }
+      self.firstFrameTimestampNs = nil
+      self.lastPresentationTime = .invalid
+      if #available(iOS 17.0, *),
+         let videoRenderer = self.videoRenderer as? AVSampleBufferVideoRenderer {
+        videoRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+        return
+      }
+      DispatchQueue.main.async { [weak self] in
+        self?.sampleBufferDisplayLayer.flushAndRemoveImage()
+      }
     }
   }
 
@@ -188,6 +208,13 @@ final class VicallSampleBufferVideoView: UIView, RTKRTCVideoRenderer {
     _ source: CVPixelBuffer,
     rotation: RTKRTCVideoRotation
   ) -> CVPixelBuffer? {
+    // Avoid an expensive Core Image conversion for the common case. Keeping
+    // the WebRTC IOSurface-backed buffer also makes rendering considerably more
+    // reliable while iOS grants the app only background PiP execution time.
+    guard rotation.rawValue != 0 else {
+      return source
+    }
+
     var image = CIImage(cvPixelBuffer: source)
     switch rotation.rawValue {
     case 90:
@@ -257,7 +284,10 @@ final class VicallSampleBufferVideoView: UIView, RTKRTCVideoRenderer {
     return output
   }
 
-  private func sampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
+  private func sampleBuffer(
+    from pixelBuffer: CVPixelBuffer,
+    timestampNs: Int64
+  ) -> CMSampleBuffer? {
     var formatDescription: CMVideoFormatDescription?
     guard CMVideoFormatDescriptionCreateForImageBuffer(
       allocator: kCFAllocatorDefault,
@@ -270,7 +300,7 @@ final class VicallSampleBufferVideoView: UIView, RTKRTCVideoRenderer {
 
     var timing = CMSampleTimingInfo(
       duration: .invalid,
-      presentationTimeStamp: .zero,
+      presentationTimeStamp: presentationTime(for: timestampNs),
       decodeTimeStamp: .invalid
     )
     var sampleBuffer: CMSampleBuffer?
@@ -293,6 +323,53 @@ final class VicallSampleBufferVideoView: UIView, RTKRTCVideoRenderer {
     )
     return sampleBuffer
   }
+
+  private func presentationTime(for timestampNs: Int64) -> CMTime {
+    let origin = firstFrameTimestampNs ?? timestampNs
+    firstFrameTimestampNs = origin
+    let relativeTimestamp = max(0, timestampNs - origin)
+    var presentationTime = CMTime(
+      value: relativeTimestamp,
+      timescale: 1_000_000_000
+    )
+
+    // Some WebRTC renegotiations can repeat one timestamp. AVFoundation may
+    // drop buffers with a non-increasing PTS, so always move forward by 1 ns.
+    if lastPresentationTime.isValid,
+       CMTimeCompare(presentationTime, lastPresentationTime) <= 0 {
+      presentationTime = CMTimeAdd(
+        lastPresentationTime,
+        CMTime(value: 1, timescale: 1_000_000_000)
+      )
+    }
+    lastPresentationTime = presentationTime
+    return presentationTime
+  }
+
+  private func enqueue(_ sampleBuffer: CMSampleBuffer) {
+    if #available(iOS 17.0, *),
+       let videoRenderer = videoRenderer as? AVSampleBufferVideoRenderer {
+      if videoRenderer.status == .failed || videoRenderer.requiresFlushToResumeDecoding {
+        videoRenderer.flush()
+      }
+      videoRenderer.enqueue(sampleBuffer)
+      return
+    }
+
+    // On iOS 16 AVSampleBufferDisplayLayer is the only renderer available and
+    // must be touched on the main queue. The iOS 17 renderer above is explicitly
+    // safe for background-queue enqueuing.
+    DispatchQueue.main.async { [weak self] in
+      guard let self else {
+        return
+      }
+      if self.sampleBufferDisplayLayer.status == .failed ||
+         self.sampleBufferDisplayLayer.requiresFlushToResumeDecoding {
+        self.sampleBufferDisplayLayer.flush()
+      }
+      self.sampleBufferDisplayLayer.enqueue(sampleBuffer)
+    }
+  }
 }
 
 final class VicallPictureInPictureManager: NSObject {
@@ -311,6 +388,9 @@ final class VicallPictureInPictureManager: NSObject {
   private var autoEnterEnabled = true
   private var restoreCompletionHandler: ((Bool) -> Void)?
   private var restoreTimeoutWorkItem: DispatchWorkItem?
+  private var startCompletionHandler: ((Result<Void, Error>) -> Void)?
+  private var startPossibleWorkItem: DispatchWorkItem?
+  private var startTimeoutWorkItem: DispatchWorkItem?
 
   private override init() {
     super.init()
@@ -452,17 +532,26 @@ final class VicallPictureInPictureManager: NSObject {
     enableMultitaskingCameraAccess(from: localVideoView)
   }
 
-  func start() throws {
+  func start(completion: @escaping (Result<Void, Error>) -> Void) {
     guard let controller else {
-      throw VicallPictureInPictureError.notPrepared
+      completion(.failure(VicallPictureInPictureError.notPrepared))
+      return
     }
-    guard controller.isPictureInPicturePossible else {
-      throw VicallPictureInPictureError.notPossible
+    if controller.isPictureInPictureActive {
+      completion(.success(()))
+      return
     }
-    controller.startPictureInPicture()
+
+    completeStart(.failure(VicallPictureInPictureError.notPossible))
+    startCompletionHandler = completion
+    waitUntilPictureInPictureIsPossible(
+      controller: controller,
+      deadline: Date().timeIntervalSinceReferenceDate + 2.5
+    )
   }
 
   func stop() {
+    completeStart(.failure(VicallPictureInPictureError.notPossible))
     controller?.stopPictureInPicture()
   }
 
@@ -481,6 +570,7 @@ final class VicallPictureInPictureManager: NSObject {
 
   func dispose() {
     completeRestore(false)
+    completeStart(.failure(VicallPictureInPictureError.notPrepared))
     controller?.delegate = nil
     controller?.contentSource = nil
     if let renderer, let videoTrack {
@@ -497,6 +587,63 @@ final class VicallPictureInPictureManager: NSObject {
     cameraOffView = nil
     cameraOffLabel = nil
     sourceView = nil
+  }
+
+  private func waitUntilPictureInPictureIsPossible(
+    controller expectedController: AVPictureInPictureController,
+    deadline: TimeInterval
+  ) {
+    guard controller === expectedController else {
+      completeStart(.failure(VicallPictureInPictureError.notPrepared))
+      return
+    }
+    guard !expectedController.isPictureInPictureActive else {
+      completeStart(.success(()))
+      return
+    }
+
+    if expectedController.isPictureInPicturePossible {
+      startPossibleWorkItem = nil
+      expectedController.startPictureInPicture()
+      let timeout = DispatchWorkItem { [weak self, weak expectedController] in
+        guard let self,
+              let expectedController,
+              !expectedController.isPictureInPictureActive else {
+          return
+        }
+        self.completeStart(.failure(VicallPictureInPictureError.notPossible))
+      }
+      startTimeoutWorkItem = timeout
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: timeout)
+      return
+    }
+
+    guard Date().timeIntervalSinceReferenceDate < deadline else {
+      completeStart(.failure(VicallPictureInPictureError.notPossible))
+      return
+    }
+
+    let retry = DispatchWorkItem { [weak self, weak expectedController] in
+      guard let self, let expectedController else {
+        return
+      }
+      self.waitUntilPictureInPictureIsPossible(
+        controller: expectedController,
+        deadline: deadline
+      )
+    }
+    startPossibleWorkItem = retry
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: retry)
+  }
+
+  private func completeStart(_ result: Result<Void, Error>) {
+    startPossibleWorkItem?.cancel()
+    startPossibleWorkItem = nil
+    startTimeoutWorkItem?.cancel()
+    startTimeoutWorkItem = nil
+    let completion = startCompletionHandler
+    startCompletionHandler = nil
+    completion?(result)
   }
 
   private func makeMuteBadge() -> UIView {
@@ -585,6 +732,7 @@ extension VicallPictureInPictureManager: AVPictureInPictureControllerDelegate {
   func pictureInPictureControllerDidStartPictureInPicture(
     _ pictureInPictureController: AVPictureInPictureController
   ) {
+    completeStart(.success(()))
     VicallPictureInPictureEventStore.shared.emit(type: "didStart", active: true)
     VicallPictureInPictureEventStore.shared.emit(type: "stateChanged", active: true)
   }
@@ -593,6 +741,7 @@ extension VicallPictureInPictureManager: AVPictureInPictureControllerDelegate {
     _ pictureInPictureController: AVPictureInPictureController,
     failedToStartPictureInPictureWithError error: Error
   ) {
+    completeStart(.failure(error))
     VicallPictureInPictureEventStore.shared.emit(
       type: "failedToStart",
       active: false,

@@ -269,7 +269,7 @@ export function CallPresentationProvider({ children, session, theme: themeOverri
             return;
         }
         updateMode("minimizing");
-        const prepared = await prepareSystemPictureInPicture(activeSession, true);
+        const prepared = await prepareSystemPictureInPicture(activeSession);
         if (!prepared) {
             updateMode("inAppMini");
             return;
