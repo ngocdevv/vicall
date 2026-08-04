@@ -19,6 +19,7 @@ export function CallPresentationProvider({ children, session, theme: themeOverri
     const previousModeRef = useRef("fullscreen");
     const preparedCallIdRef = useRef(null);
     const preparePromiseRef = useRef(null);
+    const androidPresentationViewTagRef = useRef(null);
     const pictureInPictureRevisionRef = useRef(session?.pictureInPicture?.revision);
     const minimizeTimeoutRef = useRef(null);
     const errorHandlerRef = useRef(onError);
@@ -63,6 +64,11 @@ export function CallPresentationProvider({ children, session, theme: themeOverri
                 autoEnterEnabled: true,
                 seamlessResizeEnabled: true,
                 ...source.options,
+                ...(isAndroid && androidPresentationViewTagRef.current != null
+                    ? {
+                        androidPresentationViewTag: androidPresentationViewTagRef.current,
+                    }
+                    : {}),
             });
             preparedCallIdRef.current = activeSession.callId;
             return true;
@@ -284,7 +290,26 @@ export function CallPresentationProvider({ children, session, theme: themeOverri
             await CallManager.disposePictureInPicture().catch(reportError);
         }
     }, [reportError, updateMode]);
-    const value = useMemo(() => ({ mode, session, theme, minimize, restore, endCall }), [endCall, minimize, mode, restore, session, theme]);
+    const setAndroidPresentationViewTag = useCallback((tag) => {
+        androidPresentationViewTagRef.current = tag;
+    }, []);
+    const value = useMemo(() => ({
+        mode,
+        session,
+        theme,
+        minimize,
+        restore,
+        endCall,
+        setAndroidPresentationViewTag,
+    }), [
+        endCall,
+        minimize,
+        mode,
+        restore,
+        session,
+        setAndroidPresentationViewTag,
+        theme,
+    ]);
     return (_jsx(CallPresentationContext, { value: value, children: children }));
 }
 //# sourceMappingURL=call-presentation-provider.js.map

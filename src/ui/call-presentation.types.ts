@@ -92,4 +92,6 @@ export interface CallPresentationContextValue {
   minimize(): Promise<void>;
   restore(): Promise<void>;
   endCall(): Promise<void>;
+  /** @internal Registered by CallOverlayHost for a synchronous Android PiP handoff. */
+  setAndroidPresentationViewTag(tag: number | null): void;
 }

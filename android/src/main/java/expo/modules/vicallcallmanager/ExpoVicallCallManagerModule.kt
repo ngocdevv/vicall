@@ -166,7 +166,17 @@ class ExpoVicallCallManagerModule : Module() {
       ->
       val activity = requireActivity()
       val videoView = appContext.findView<android.view.View>(videoViewTag)
-      VicallPictureInPictureManager.prepare(activity, videoView, options)
+      val presentationViewTag =
+        (options?.get("androidPresentationViewTag") as? Number)?.toInt()
+      val presentationView = presentationViewTag?.let { tag ->
+        runCatching { appContext.findView<android.view.View>(tag) }.getOrNull()
+      }
+      VicallPictureInPictureManager.prepare(
+        activity,
+        videoView,
+        presentationView,
+        options,
+      )
     }
 
     AsyncFunction("setPictureInPictureAutoEnterEnabled") {

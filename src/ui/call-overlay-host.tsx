@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { StatusBar, Text, useWindowDimensions, View } from "react-native";
+import {
+  findNodeHandle,
+  StatusBar,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   interpolate,
@@ -22,6 +28,7 @@ import type { CallOverlayHostProps } from "./call-presentation.types";
 import { CallVideoContent, MuteBadge } from "./call-video-content";
 
 const isIOS = process.env.EXPO_OS === "ios";
+const isAndroid = process.env.EXPO_OS === "android";
 const MINI_PEEK = 30;
 const SPRING = { damping: 24, stiffness: 260 };
 
@@ -31,14 +38,22 @@ export function CallOverlayHost({
   edgeInset = 12,
   controlsAutoHideDelay = 4000,
 }: CallOverlayHostProps) {
-  const { mode, session, theme, minimize, restore, endCall } =
-    useCallPresentation();
+  const {
+    mode,
+    session,
+    theme,
+    minimize,
+    restore,
+    endCall,
+    setAndroidPresentationViewTag,
+  } = useCallPresentation();
   const insets = useSafeAreaInsets();
   const window = useWindowDimensions();
   const [controlsVisible, setControlsVisible] = useState(true);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousModeRef = useRef(mode);
   const miniInitializedRef = useRef(false);
+  const surfaceRef = useRef<View>(null);
 
   const resolvedMiniWidth = Math.min(
     miniWidth,
@@ -125,6 +140,16 @@ export function CallOverlayHost({
       return next;
     });
   }, [clearControlsTimer, scheduleControlsAutoHide]);
+
+  const registerAndroidPresentationView = useCallback(() => {
+    if (!isAndroid) return;
+    setAndroidPresentationViewTag(findNodeHandle(surfaceRef.current));
+  }, [setAndroidPresentationViewTag]);
+
+  useEffect(
+    () => () => setAndroidPresentationViewTag(null),
+    [setAndroidPresentationViewTag],
+  );
 
   useEffect(() => {
     if (mode === "fullscreen") showControls();
@@ -462,6 +487,8 @@ export function CallOverlayHost({
 
       <GestureDetector gesture={surfaceGesture}>
         <Animated.View
+          ref={surfaceRef}
+          onLayout={registerAndroidPresentationView}
           style={[
             {
               backgroundColor: theme.backgroundColor,

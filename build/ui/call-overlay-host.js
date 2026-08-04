@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { StatusBar, Text, useWindowDimensions, View } from "react-native";
+import { findNodeHandle, StatusBar, Text, useWindowDimensions, View, } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming, } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,16 +9,18 @@ import { clampCallOverlay, resolveCallOverlayRelease, shouldMinimizeCall, } from
 import { useCallPresentation } from "./call-presentation-context";
 import { CallVideoContent, MuteBadge } from "./call-video-content";
 const isIOS = process.env.EXPO_OS === "ios";
+const isAndroid = process.env.EXPO_OS === "android";
 const MINI_PEEK = 30;
 const SPRING = { damping: 24, stiffness: 260 };
 export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset = 12, controlsAutoHideDelay = 4000, }) {
-    const { mode, session, theme, minimize, restore, endCall } = useCallPresentation();
+    const { mode, session, theme, minimize, restore, endCall, setAndroidPresentationViewTag, } = useCallPresentation();
     const insets = useSafeAreaInsets();
     const window = useWindowDimensions();
     const [controlsVisible, setControlsVisible] = useState(true);
     const controlsTimerRef = useRef(null);
     const previousModeRef = useRef(mode);
     const miniInitializedRef = useRef(false);
+    const surfaceRef = useRef(null);
     const resolvedMiniWidth = Math.min(miniWidth, Math.max(120, window.width - edgeInset * 2));
     const resolvedMiniHeight = Math.min(miniHeight, Math.max(88, window.height * 0.32));
     const topBound = Math.max(insets.top, edgeInset) + edgeInset;
@@ -83,6 +85,12 @@ export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset =
             return next;
         });
     }, [clearControlsTimer, scheduleControlsAutoHide]);
+    const registerAndroidPresentationView = useCallback(() => {
+        if (!isAndroid)
+            return;
+        setAndroidPresentationViewTag(findNodeHandle(surfaceRef.current));
+    }, [setAndroidPresentationViewTag]);
+    useEffect(() => () => setAndroidPresentationViewTag(null), [setAndroidPresentationViewTag]);
     useEffect(() => {
         if (mode === "fullscreen")
             showControls();
@@ -330,7 +338,7 @@ export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset =
             right: 0,
             top: 0,
             zIndex: 999,
-        }, children: [fullscreenLike && (_jsx(StatusBar, { backgroundColor: "transparent", barStyle: "light-content" })), _jsx(GestureDetector, { gesture: surfaceGesture, children: _jsxs(Animated.View, { style: [
+        }, children: [fullscreenLike && (_jsx(StatusBar, { backgroundColor: "transparent", barStyle: "light-content" })), _jsx(GestureDetector, { gesture: surfaceGesture, children: _jsxs(Animated.View, { ref: surfaceRef, onLayout: registerAndroidPresentationView, style: [
                         {
                             backgroundColor: theme.backgroundColor,
                             borderColor: theme.miniBorderColor,

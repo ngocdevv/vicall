@@ -37,6 +37,7 @@ export function CallPresentationProvider({
   const previousModeRef = useRef<CallPresentationMode>("fullscreen");
   const preparedCallIdRef = useRef<string | null>(null);
   const preparePromiseRef = useRef<Promise<boolean> | null>(null);
+  const androidPresentationViewTagRef = useRef<number | null>(null);
   const pictureInPictureRevisionRef = useRef<string | number | undefined>(
     session?.pictureInPicture?.revision,
   );
@@ -94,6 +95,12 @@ export function CallPresentationProvider({
           autoEnterEnabled: true,
           seamlessResizeEnabled: true,
           ...source.options,
+          ...(isAndroid && androidPresentationViewTagRef.current != null
+            ? {
+                androidPresentationViewTag:
+                  androidPresentationViewTagRef.current,
+              }
+            : {}),
         });
         preparedCallIdRef.current = activeSession.callId;
         return true;
@@ -343,9 +350,29 @@ export function CallPresentationProvider({
     }
   }, [reportError, updateMode]);
 
+  const setAndroidPresentationViewTag = useCallback((tag: number | null) => {
+    androidPresentationViewTagRef.current = tag;
+  }, []);
+
   const value = useMemo(
-    () => ({ mode, session, theme, minimize, restore, endCall }),
-    [endCall, minimize, mode, restore, session, theme],
+    () => ({
+      mode,
+      session,
+      theme,
+      minimize,
+      restore,
+      endCall,
+      setAndroidPresentationViewTag,
+    }),
+    [
+      endCall,
+      minimize,
+      mode,
+      restore,
+      session,
+      setAndroidPresentationViewTag,
+      theme,
+    ],
   );
 
   return (

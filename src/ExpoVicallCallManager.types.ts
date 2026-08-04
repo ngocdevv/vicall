@@ -97,6 +97,8 @@ export interface PictureInPictureOptions {
   seamlessResizeEnabled?: boolean;
   /** Optional Android screen-space transition source rectangle. */
   sourceRect?: PictureInPictureSourceRect;
+  /** @internal Native tag of the Hybrid presentation surface on Android. */
+  androidPresentationViewTag?: number;
 }
 
 export interface PictureInPictureEvent {

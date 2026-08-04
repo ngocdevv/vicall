@@ -9,16 +9,26 @@ import android.graphics.Rect
 import android.os.Build
 import android.util.Rational
 import android.view.View
+import android.view.ViewGroup
 import java.lang.ref.WeakReference
 
 object VicallPictureInPictureManager {
   private var sourceView = WeakReference<View>(null)
+  private var presentationView = WeakReference<View>(null)
   private var aspectRatio = Rational(9, 16)
   private var sourceRect: Rect? = null
   private var autoEnterEnabled = true
   private var seamlessResizeEnabled = true
   private var prepared = false
   private var lastKnownActive = false
+  private var presentationSnapshot: PresentationSnapshot? = null
+
+  private data class PresentationSnapshot(
+    val height: Int,
+    val translationX: Float,
+    val translationY: Float,
+    val width: Int,
+  )
 
   fun isSupported(context: Context): Boolean =
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
@@ -33,10 +43,13 @@ object VicallPictureInPictureManager {
   fun prepare(
     activity: Activity,
     videoView: View?,
+    hybridPresentationView: View?,
     options: Map<String, Any?>?,
   ) {
     requireSupported(activity)
     sourceView = WeakReference(videoView)
+    presentationView = WeakReference(hybridPresentationView)
+    presentationSnapshot = null
     aspectRatio = readAspectRatio(options)
     sourceRect = readSourceRect(options) ?: visibleRect(videoView)
     autoEnterEnabled = options?.get("autoEnterEnabled") as? Boolean ?: true
@@ -59,6 +72,7 @@ object VicallPictureInPictureManager {
     }
     VicallPictureInPictureEventStore.emit("willStart", active = false)
     try {
+      preparePresentationViewForSystemPip()
       sourceRect = visibleRect(sourceView.get()) ?: sourceRect
       val entered = activity.enterPictureInPictureMode(buildParams())
       if (entered) return
@@ -92,7 +106,9 @@ object VicallPictureInPictureManager {
     if (activity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       updateParams(activity)
     }
+    restorePresentationViewAfterSystemPip()
     sourceView.clear()
+    presentationView.clear()
     sourceRect = null
     prepared = false
   }
@@ -102,7 +118,23 @@ object VicallPictureInPictureManager {
       Build.VERSION.SDK_INT in Build.VERSION_CODES.O until Build.VERSION_CODES.S
 
   @JvmStatic
+  fun onUserLeaveHint(activity: Activity) {
+    if (!prepared || !autoEnterEnabled || isActive(activity)) return
+    preparePresentationViewForSystemPip()
+    activity.window.decorView.postDelayed({
+      if (!isActive(activity)) {
+        restorePresentationViewAfterSystemPip()
+      }
+    }, 1_200)
+  }
+
+  @JvmStatic
   fun onPictureInPictureModeChanged(active: Boolean) {
+    if (active) {
+      preparePresentationViewForSystemPip()
+    } else {
+      restorePresentationViewAfterSystemPip()
+    }
     if (lastKnownActive == active) return
     if (active) {
       VicallPictureInPictureEventStore.emit("didStart", active = true)
@@ -122,6 +154,43 @@ object VicallPictureInPictureManager {
   private fun updateParams(activity: Activity) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     activity.setPictureInPictureParams(buildParams())
+  }
+
+  private fun preparePresentationViewForSystemPip() {
+    val view = presentationView.get() ?: return
+    val layoutParams = view.layoutParams ?: return
+    if (presentationSnapshot == null) {
+      presentationSnapshot = PresentationSnapshot(
+        height = layoutParams.height,
+        translationX = view.translationX,
+        translationY = view.translationY,
+        width = layoutParams.width,
+      )
+    }
+
+    val left = view.left
+    val top = view.top
+    layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT
+    layoutParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+    view.layoutParams = layoutParams
+    view.translationX = -left.toFloat()
+    view.translationY = -top.toFloat()
+    view.requestLayout()
+  }
+
+  private fun restorePresentationViewAfterSystemPip() {
+    val view = presentationView.get()
+    val snapshot = presentationSnapshot
+    presentationSnapshot = null
+    if (view == null || snapshot == null) return
+
+    val layoutParams = view.layoutParams ?: return
+    layoutParams.width = snapshot.width
+    layoutParams.height = snapshot.height
+    view.layoutParams = layoutParams
+    view.translationX = snapshot.translationX
+    view.translationY = snapshot.translationY
+    view.requestLayout()
   }
 
   private fun buildParams(): PictureInPictureParams {
