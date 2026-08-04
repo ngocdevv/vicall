@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import CallManager from "../ExpoVicallCallManagerModule";
 import { CallPresentationContext } from "./call-presentation-context";
+import { resolvePictureInPictureRevisionAction } from "./call-presentation-state";
 import { defaultCallPresentationTheme } from "./call-presentation-theme";
 const isIOS = process.env.EXPO_OS === "ios";
 const isAndroid = process.env.EXPO_OS === "android";
@@ -135,6 +136,23 @@ export function CallPresentationProvider({ children, session, theme: themeOverri
                 break;
         }
     }, [reportError, updateMode]);
+    const refreshSystemPictureInPictureTracks = useCallback(async (activeSession) => {
+        const source = activeSession.pictureInPicture;
+        if (source == null)
+            return false;
+        const remoteViewTag = source.getRemoteViewTag();
+        if (remoteViewTag == null)
+            return false;
+        const localViewTag = source.getLocalViewTag?.() ?? null;
+        try {
+            await CallManager.refreshPictureInPictureVideoTracks(remoteViewTag, localViewTag);
+            return true;
+        }
+        catch (error) {
+            reportError(error);
+            return false;
+        }
+    }, [reportError]);
     useEffect(() => {
         const subscription = CallManager.addListener("onPictureInPictureEvent", handlePictureInPictureEvent);
         void CallManager.getInitialPictureInPictureEvents()
@@ -194,16 +212,25 @@ export function CallPresentationProvider({ children, session, theme: themeOverri
         const revision = session?.pictureInPicture?.revision;
         const changed = pictureInPictureRevisionRef.current !== revision;
         pictureInPictureRevisionRef.current = revision;
-        if (session == null || !changed || modeRef.current === "systemPip")
+        if (session == null)
+            return;
+        const action = resolvePictureInPictureRevisionAction(modeRef.current, changed);
+        if (action === "none")
             return;
         afterNextLayout(() => {
             const activeSession = sessionRef.current;
             if (activeSession?.callId === session.callId) {
-                void prepareSystemPictureInPicture(activeSession, true);
+                if (action === "refresh") {
+                    void refreshSystemPictureInPictureTracks(activeSession);
+                }
+                else {
+                    void prepareSystemPictureInPicture(activeSession, true);
+                }
             }
         });
     }, [
         prepareSystemPictureInPicture,
+        refreshSystemPictureInPictureTracks,
         session?.callId,
         session?.pictureInPicture?.revision,
     ]);

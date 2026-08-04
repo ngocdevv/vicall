@@ -44,6 +44,10 @@ declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallMan
     localVideoViewTag: number | null,
     options?: PictureInPictureOptions,
   ): Promise<void>;
+  refreshPictureInPictureVideoTracks(
+    videoViewTag: number,
+    localVideoViewTag: number | null,
+  ): Promise<void>;
   setPictureInPictureAutoEnterEnabled(enabled: boolean): Promise<void>;
   startPictureInPicture(): Promise<void>;
   stopPictureInPicture(): Promise<void>;

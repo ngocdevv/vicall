@@ -2,10 +2,10 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { findNodeHandle, StatusBar, Text, useWindowDimensions, View, } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming, } from "react-native-reanimated";
+import Animated, { interpolate, runOnJS, useAnimatedKeyboard, useAnimatedReaction, useDerivedValue, useAnimatedStyle, useSharedValue, withSpring, withTiming, } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CallChrome } from "./call-chrome";
-import { clampCallOverlay, resolveCallOverlayRelease, shouldMinimizeCall, } from "./call-geometry";
+import { clampCallOverlay, resolveKeyboardAwareBottom, resolveCallOverlayRelease, shouldMinimizeCall, } from "./call-geometry";
 import { useCallPresentation } from "./call-presentation-context";
 import { CallVideoContent, MuteBadge } from "./call-video-content";
 const isIOS = process.env.EXPO_OS === "ios";
@@ -41,6 +41,9 @@ export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset =
     const gestureStartY = useSharedValue(0);
     const modeCode = useSharedValue(0);
     const stashSide = useSharedValue(0);
+    const verticalAnchor = useSharedValue(1);
+    const keyboard = useAnimatedKeyboard();
+    const keyboardBottomBound = useDerivedValue(() => resolveKeyboardAwareBottom(bottomBound, topBound, keyboard.height.value));
     const localWidth = Math.min(112, window.width * 0.3);
     const localHeight = localWidth * 1.38;
     const localMinY = topBound + 54;
@@ -101,6 +104,13 @@ export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset =
     useEffect(() => {
         controlsOpacity.value = withTiming(mode === "fullscreen" && controlsVisible ? 1 : 0, { duration: 180 });
     }, [controlsOpacity, controlsVisible, mode]);
+    useAnimatedReaction(() => ({ bottom: keyboardBottomBound.value, mode: modeCode.value }), (current, previous) => {
+        if (current.mode !== 1 || current.bottom === previous?.bottom)
+            return;
+        surfaceY.value = withSpring(verticalAnchor.value === 1
+            ? current.bottom
+            : clampCallOverlay(surfaceY.value, topBound, current.bottom), SPRING);
+    });
     useEffect(() => {
         const previousMode = previousModeRef.current;
         previousModeRef.current = mode;
@@ -123,6 +133,7 @@ export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset =
             const shouldInitialize = !miniInitializedRef.current || previousMode === "fullscreen";
             if (shouldInitialize) {
                 miniInitializedRef.current = true;
+                verticalAnchor.value = 1;
                 surfaceX.value = withSpring(rightBound, SPRING);
                 surfaceY.value = withSpring(bottomBound, SPRING);
             }
@@ -178,6 +189,7 @@ export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset =
         surfaceX,
         surfaceY,
         topBound,
+        verticalAnchor,
         window.height,
         window.width,
         controlsOpacity,
@@ -216,7 +228,7 @@ export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset =
         const rawX = gestureStartX.value + event.translationX;
         const rawY = gestureStartY.value + event.translationY;
         surfaceX.value = clampCallOverlay(rawX, -resolvedMiniWidth + MINI_PEEK, window.width - MINI_PEEK);
-        surfaceY.value = clampCallOverlay(rawY, topBound, bottomBound);
+        surfaceY.value = clampCallOverlay(rawY, topBound, keyboardBottomBound.value);
     })
         .onEnd((event) => {
         if (modeCode.value === 0) {
@@ -249,14 +261,19 @@ export function CallOverlayHost({ miniWidth = 176, miniHeight = 112, edgeInset =
         if (modeCode.value !== 1)
             return;
         const release = resolveCallOverlayRelease(surfaceX.value, surfaceY.value, resolvedMiniWidth, resolvedMiniHeight, {
-            bottom: bottomBound,
+            bottom: keyboardBottomBound.value,
             left: leftBound,
             right: rightBound,
             top: topBound,
-            viewportHeight: window.height,
+            viewportHeight: keyboardBottomBound.value + resolvedMiniHeight + edgeInset,
             viewportWidth: window.width,
         }, MINI_PEEK);
         stashSide.value = release.stashSide;
+        verticalAnchor.value =
+            Math.abs(release.y - topBound) <=
+                Math.abs(release.y - keyboardBottomBound.value)
+                ? -1
+                : 1;
         surfaceX.value = withSpring(release.x, SPRING);
         surfaceY.value = withSpring(release.y, SPRING);
     });

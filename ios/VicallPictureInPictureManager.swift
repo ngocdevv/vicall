@@ -424,6 +424,34 @@ final class VicallPictureInPictureManager: NSObject {
     controller.canStartPictureInPictureAutomaticallyFromInline = enabled
   }
 
+  func refreshVideoTracks(
+    sourceView: UIView,
+    localVideoView: UIView?
+  ) throws {
+    guard let controller, let contentViewController, let renderer else {
+      throw VicallPictureInPictureError.notPrepared
+    }
+    guard let nextTrack = videoTrack(from: sourceView) else {
+      throw VicallPictureInPictureError.videoTrackNotReady
+    }
+
+    if videoTrack !== nextTrack {
+      if let videoTrack {
+        videoTrack.remove(renderer)
+      }
+      renderer.flush()
+      nextTrack.add(renderer)
+      videoTrack = nextTrack
+    }
+
+    self.sourceView = sourceView
+    controller.contentSource = AVPictureInPictureController.ContentSource(
+      activeVideoCallSourceView: sourceView,
+      contentViewController: contentViewController
+    )
+    enableMultitaskingCameraAccess(from: localVideoView)
+  }
+
   func start() throws {
     guard let controller else {
       throw VicallPictureInPictureError.notPrepared

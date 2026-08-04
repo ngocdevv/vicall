@@ -10,6 +10,9 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   interpolate,
   runOnJS,
+  useAnimatedKeyboard,
+  useAnimatedReaction,
+  useDerivedValue,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -20,6 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CallChrome } from "./call-chrome";
 import {
   clampCallOverlay,
+  resolveKeyboardAwareBottom,
   resolveCallOverlayRelease,
   shouldMinimizeCall,
 } from "./call-geometry";
@@ -88,6 +92,11 @@ export function CallOverlayHost({
   const gestureStartY = useSharedValue(0);
   const modeCode = useSharedValue(0);
   const stashSide = useSharedValue(0);
+  const verticalAnchor = useSharedValue(1);
+  const keyboard = useAnimatedKeyboard();
+  const keyboardBottomBound = useDerivedValue(() =>
+    resolveKeyboardAwareBottom(bottomBound, topBound, keyboard.height.value),
+  );
 
   const localWidth = Math.min(112, window.width * 0.3);
   const localHeight = localWidth * 1.38;
@@ -164,6 +173,19 @@ export function CallOverlayHost({
     );
   }, [controlsOpacity, controlsVisible, mode]);
 
+  useAnimatedReaction(
+    () => ({ bottom: keyboardBottomBound.value, mode: modeCode.value }),
+    (current, previous) => {
+      if (current.mode !== 1 || current.bottom === previous?.bottom) return;
+      surfaceY.value = withSpring(
+        verticalAnchor.value === 1
+          ? current.bottom
+          : clampCallOverlay(surfaceY.value, topBound, current.bottom),
+        SPRING,
+      );
+    },
+  );
+
   useEffect(() => {
     const previousMode = previousModeRef.current;
     previousModeRef.current = mode;
@@ -189,6 +211,7 @@ export function CallOverlayHost({
         !miniInitializedRef.current || previousMode === "fullscreen";
       if (shouldInitialize) {
         miniInitializedRef.current = true;
+        verticalAnchor.value = 1;
         surfaceX.value = withSpring(rightBound, SPRING);
         surfaceY.value = withSpring(bottomBound, SPRING);
       } else {
@@ -248,6 +271,7 @@ export function CallOverlayHost({
     surfaceX,
     surfaceY,
     topBound,
+    verticalAnchor,
     window.height,
     window.width,
     controlsOpacity,
@@ -316,7 +340,11 @@ export function CallOverlayHost({
         -resolvedMiniWidth + MINI_PEEK,
         window.width - MINI_PEEK,
       );
-      surfaceY.value = clampCallOverlay(rawY, topBound, bottomBound);
+      surfaceY.value = clampCallOverlay(
+        rawY,
+        topBound,
+        keyboardBottomBound.value,
+      );
     })
     .onEnd((event) => {
       if (modeCode.value === 0) {
@@ -360,16 +388,22 @@ export function CallOverlayHost({
         resolvedMiniWidth,
         resolvedMiniHeight,
         {
-          bottom: bottomBound,
+          bottom: keyboardBottomBound.value,
           left: leftBound,
           right: rightBound,
           top: topBound,
-          viewportHeight: window.height,
+          viewportHeight:
+            keyboardBottomBound.value + resolvedMiniHeight + edgeInset,
           viewportWidth: window.width,
         },
         MINI_PEEK,
       );
       stashSide.value = release.stashSide;
+      verticalAnchor.value =
+        Math.abs(release.y - topBound) <=
+        Math.abs(release.y - keyboardBottomBound.value)
+          ? -1
+          : 1;
       surfaceX.value = withSpring(release.x, SPRING);
       surfaceY.value = withSpring(release.y, SPRING);
     });

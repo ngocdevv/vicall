@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   clampCallOverlay,
+  resolveKeyboardAwareBottom,
   resolveCallOverlayRelease,
   shouldMinimizeCall,
 } from "../src/ui/call-geometry";
@@ -20,6 +21,12 @@ test("clamps a dragged overlay to its allowed range", () => {
   assert.equal(clampCallOverlay(-20, 12, 202), 12);
   assert.equal(clampCallOverlay(99, 12, 202), 99);
   assert.equal(clampCallOverlay(250, 12, 202), 202);
+});
+
+test("keeps an in-app mini-player above the software keyboard", () => {
+  assert.equal(resolveKeyboardAwareBottom(700, 58, 0), 700);
+  assert.equal(resolveKeyboardAwareBottom(700, 58, 310), 390);
+  assert.equal(resolveKeyboardAwareBottom(700, 58, 900), 58);
 });
 
 test("commits fullscreen minimization by distance or velocity", () => {

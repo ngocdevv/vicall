@@ -22,6 +22,15 @@ export function clampCallOverlay(
   return Math.min(Math.max(value, minimum), maximum);
 }
 
+export function resolveKeyboardAwareBottom(
+  restingBottom: number,
+  top: number,
+  keyboardHeight: number,
+): number {
+  "worklet";
+  return Math.max(top, restingBottom - Math.max(0, keyboardHeight));
+}
+
 export function shouldMinimizeCall(
   translationY: number,
   velocityY: number,
@@ -53,7 +62,13 @@ export function resolveCallOverlayRelease(
 
   return {
     stashSide: 0,
-    x: x + width / 2 < bounds.viewportWidth / 2 ? bounds.left : bounds.right,
-    y: y + height / 2 < bounds.viewportHeight / 2 ? bounds.top : bounds.bottom,
+    x:
+      Math.abs(x - bounds.left) <= Math.abs(x - bounds.right)
+        ? bounds.left
+        : bounds.right,
+    y:
+      Math.abs(y - bounds.top) <= Math.abs(y - bounds.bottom)
+        ? bounds.top
+        : bounds.bottom,
   };
 }

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.UUID
@@ -177,7 +178,7 @@ class ExpoVicallCallManagerModule : Module() {
         presentationView,
         options,
       )
-    }
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("setPictureInPictureAutoEnterEnabled") {
       enabled: Boolean,
@@ -186,22 +187,29 @@ class ExpoVicallCallManagerModule : Module() {
         requireActivity(),
         enabled,
       )
-    }
+    }.runOnQueue(Queues.MAIN)
+
+    AsyncFunction("refreshPictureInPictureVideoTracks") {
+      videoViewTag: Int,
+      _: Int?,
+      ->
+      val videoView = appContext.findView<android.view.View>(videoViewTag)
+      VicallPictureInPictureManager.refreshSourceView(videoView)
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("startPictureInPicture") {
       VicallPictureInPictureManager.start(requireActivity())
-    }
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("stopPictureInPicture") {
       VicallPictureInPictureManager.stop(requireActivity())
-    }
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("updatePictureInPictureState") {
-      _: Map<String, Any?>,
+      state: Map<String, Any?>,
       ->
-      // Android PiP displays the React Activity. CallOverlayHost renders these
-      // indicators before and while the Activity is in PiP mode.
-    }
+      VicallPictureInPictureManager.updateVisualState(state)
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("completePictureInPictureRestore") {
       _: Boolean,
@@ -212,7 +220,7 @@ class ExpoVicallCallManagerModule : Module() {
 
     AsyncFunction("disposePictureInPicture") {
       VicallPictureInPictureManager.dispose(appContext.currentActivity)
-    }
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("getInitialPictureInPictureEvents") {
       VicallPictureInPictureEventStore.initialEvents()

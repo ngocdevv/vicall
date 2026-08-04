@@ -4,6 +4,7 @@ import { AppState } from "react-native";
 import type { PictureInPictureEvent } from "../ExpoVicallCallManager.types";
 import CallManager from "../ExpoVicallCallManagerModule";
 import { CallPresentationContext } from "./call-presentation-context";
+import { resolvePictureInPictureRevisionAction } from "./call-presentation-state";
 import { defaultCallPresentationTheme } from "./call-presentation-theme";
 import type {
   CallPresentationMode,
@@ -180,6 +181,28 @@ export function CallPresentationProvider({
     [reportError, updateMode],
   );
 
+  const refreshSystemPictureInPictureTracks = useCallback(
+    async (activeSession: HybridCallSession) => {
+      const source = activeSession.pictureInPicture;
+      if (source == null) return false;
+      const remoteViewTag = source.getRemoteViewTag();
+      if (remoteViewTag == null) return false;
+      const localViewTag = source.getLocalViewTag?.() ?? null;
+
+      try {
+        await CallManager.refreshPictureInPictureVideoTracks(
+          remoteViewTag,
+          localViewTag,
+        );
+        return true;
+      } catch (error) {
+        reportError(error);
+        return false;
+      }
+    },
+    [reportError],
+  );
+
   useEffect(() => {
     const subscription = CallManager.addListener(
       "onPictureInPictureEvent",
@@ -248,15 +271,25 @@ export function CallPresentationProvider({
     const revision = session?.pictureInPicture?.revision;
     const changed = pictureInPictureRevisionRef.current !== revision;
     pictureInPictureRevisionRef.current = revision;
-    if (session == null || !changed || modeRef.current === "systemPip") return;
+    if (session == null) return;
+    const action = resolvePictureInPictureRevisionAction(
+      modeRef.current,
+      changed,
+    );
+    if (action === "none") return;
     afterNextLayout(() => {
       const activeSession = sessionRef.current;
       if (activeSession?.callId === session.callId) {
-        void prepareSystemPictureInPicture(activeSession, true);
+        if (action === "refresh") {
+          void refreshSystemPictureInPictureTracks(activeSession);
+        } else {
+          void prepareSystemPictureInPicture(activeSession, true);
+        }
       }
     });
   }, [
     prepareSystemPictureInPicture,
+    refreshSystemPictureInPictureTracks,
     session?.callId,
     session?.pictureInPicture?.revision,
   ]);

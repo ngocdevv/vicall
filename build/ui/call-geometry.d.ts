@@ -12,6 +12,7 @@ export interface CallOverlayRelease {
     y: number;
 }
 export declare function clampCallOverlay(value: number, minimum: number, maximum: number): number;
+export declare function resolveKeyboardAwareBottom(restingBottom: number, top: number, keyboardHeight: number): number;
 export declare function shouldMinimizeCall(translationY: number, velocityY: number, viewportHeight: number): boolean;
 export declare function resolveCallOverlayRelease(x: number, y: number, width: number, height: number, bounds: CallOverlayBounds, visiblePeek: number): CallOverlayRelease;
 //# sourceMappingURL=call-geometry.d.ts.map

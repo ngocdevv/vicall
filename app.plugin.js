@@ -103,6 +103,7 @@ function configurePictureInPictureManifest(manifest) {
 function addPictureInPictureCallback(contents, language) {
   const callbackMarker = "expo-vicall-call-manager: PiP callback";
   const handoffMarker = "expo-vicall-call-manager: PiP handoff";
+  const pauseHandoffMarker = "expo-vicall-call-manager: PiP pause handoff";
   let methods = "";
 
   if (!contents.includes(callbackMarker)) {
@@ -144,6 +145,25 @@ function addPictureInPictureCallback(contents, language) {
     expo.modules.vicallcallmanager.VicallPictureInPictureManager
       .onUserLeaveHint(this)
     super.onUserLeaveHint()
+  }
+`;
+  }
+
+  if (!contents.includes(pauseHandoffMarker)) {
+    methods += language === "java" ? `
+  // ${pauseHandoffMarker}
+  @Override
+  protected void onPause() {
+    expo.modules.vicallcallmanager.VicallPictureInPictureManager
+        .onActivityPausing(this);
+    super.onPause();
+  }
+` : `
+  // ${pauseHandoffMarker}
+  override fun onPause() {
+    expo.modules.vicallcallmanager.VicallPictureInPictureManager
+      .onActivityPausing(this)
+    super.onPause()
   }
 `;
   }

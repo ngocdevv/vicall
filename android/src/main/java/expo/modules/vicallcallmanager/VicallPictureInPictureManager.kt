@@ -7,21 +7,44 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Rational
 import android.view.View
 import android.view.ViewGroup
 import java.lang.ref.WeakReference
 
 object VicallPictureInPictureManager {
+  private var activity = WeakReference<Activity>(null)
   private var sourceView = WeakReference<View>(null)
   private var presentationView = WeakReference<View>(null)
   private var aspectRatio = Rational(9, 16)
   private var sourceRect: Rect? = null
+  private var sourceRectWasProvided = false
   private var autoEnterEnabled = true
   private var seamlessResizeEnabled = true
   private var prepared = false
   private var lastKnownActive = false
+  private var remoteCameraEnabled = true
   private var presentationSnapshot: PresentationSnapshot? = null
+  private val nativeVideoRenderer = VicallAndroidPipVideoRenderer()
+  private val mainHandler = Handler(Looper.getMainLooper())
+  // React timers may pause while Android keeps the native PiP task alive. Poll
+  // the WebRTCView only during PiP so a native RealtimeKit track replacement
+  // can be rebound without waiting for the JS runtime to resume.
+  private val refreshVideoTrack = object : Runnable {
+    override fun run() {
+      if (!prepared || !lastKnownActive) return
+      val ready = nativeVideoRenderer.refresh(
+        activity.get(),
+        sourceView.get(),
+      )
+      if (ready) {
+        nativeVideoRenderer.show()
+      }
+      mainHandler.postDelayed(this, VIDEO_TRACK_REFRESH_INTERVAL_MS)
+    }
+  }
 
   private data class PresentationSnapshot(
     val height: Int,
@@ -47,11 +70,15 @@ object VicallPictureInPictureManager {
     options: Map<String, Any?>?,
   ) {
     requireSupported(activity)
+    this.activity = WeakReference(activity)
     sourceView = WeakReference(videoView)
     presentationView = WeakReference(hybridPresentationView)
     presentationSnapshot = null
+    nativeVideoRenderer.prepare(activity, videoView)
     aspectRatio = readAspectRatio(options)
-    sourceRect = readSourceRect(options) ?: visibleRect(videoView)
+    val configuredSourceRect = readSourceRect(options)
+    sourceRectWasProvided = configuredSourceRect != null
+    sourceRect = configuredSourceRect ?: transitionSourceRect()
     autoEnterEnabled = options?.get("autoEnterEnabled") as? Boolean ?: true
     seamlessResizeEnabled =
       options?.get("seamlessResizeEnabled") as? Boolean ?: true
@@ -65,6 +92,19 @@ object VicallPictureInPictureManager {
     updateParams(activity)
   }
 
+  fun refreshSourceView(videoView: View?) {
+    sourceView = WeakReference(videoView)
+    if (!sourceRectWasProvided) {
+      sourceRect = transitionSourceRect() ?: sourceRect
+    }
+    nativeVideoRenderer.refresh(activity.get(), videoView)
+  }
+
+  fun updateVisualState(state: Map<String, Any?>) {
+    remoteCameraEnabled = state["remoteCameraEnabled"] as? Boolean ?: true
+    nativeVideoRenderer.setVideoEnabled(remoteCameraEnabled)
+  }
+
   fun start(activity: Activity) {
     requireSupported(activity)
     check(prepared) {
@@ -72,8 +112,12 @@ object VicallPictureInPictureManager {
     }
     VicallPictureInPictureEventStore.emit("willStart", active = false)
     try {
-      preparePresentationViewForSystemPip()
-      sourceRect = visibleRect(sourceView.get()) ?: sourceRect
+      if (!nativeVideoRenderer.show()) {
+        preparePresentationViewForSystemPip()
+      }
+      if (!sourceRectWasProvided) {
+        sourceRect = transitionSourceRect() ?: sourceRect
+      }
       val entered = activity.enterPictureInPictureMode(buildParams())
       if (entered) return
 
@@ -102,15 +146,20 @@ object VicallPictureInPictureManager {
   }
 
   fun dispose(activity: Activity?) {
+    stopVideoTrackRefresh()
     autoEnterEnabled = false
     if (activity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       updateParams(activity)
     }
     restorePresentationViewAfterSystemPip()
+    nativeVideoRenderer.dispose()
+    this.activity.clear()
     sourceView.clear()
     presentationView.clear()
     sourceRect = null
+    sourceRectWasProvided = false
     prepared = false
+    lastKnownActive = false
   }
 
   fun shouldAutoEnterForLegacy(): Boolean =
@@ -119,10 +168,31 @@ object VicallPictureInPictureManager {
 
   @JvmStatic
   fun onUserLeaveHint(activity: Activity) {
+    preparePresentationForPendingSystemPip(activity, allowReactHandoff = true)
+  }
+
+  @JvmStatic
+  fun onActivityPausing(activity: Activity) {
+    preparePresentationForPendingSystemPip(activity, allowReactHandoff = false)
+  }
+
+  private fun preparePresentationForPendingSystemPip(
+    activity: Activity,
+    allowReactHandoff: Boolean,
+  ) {
     if (!prepared || !autoEnterEnabled || isActive(activity)) return
-    preparePresentationViewForSystemPip()
+    if (!sourceRectWasProvided) {
+      sourceRect = transitionSourceRect() ?: sourceRect
+      updateParams(activity)
+    }
+    nativeVideoRenderer.refresh(activity, sourceView.get())
+    val nativeRendererVisible = nativeVideoRenderer.show()
+    if (!nativeRendererVisible && allowReactHandoff) {
+      preparePresentationViewForSystemPip()
+    }
     activity.window.decorView.postDelayed({
       if (!isActive(activity)) {
+        nativeVideoRenderer.hide()
         restorePresentationViewAfterSystemPip()
       }
     }, 1_200)
@@ -131,8 +201,14 @@ object VicallPictureInPictureManager {
   @JvmStatic
   fun onPictureInPictureModeChanged(active: Boolean) {
     if (active) {
-      preparePresentationViewForSystemPip()
+      nativeVideoRenderer.refresh(activity.get(), sourceView.get())
+      if (!nativeVideoRenderer.show()) {
+        preparePresentationViewForSystemPip()
+      }
+      startVideoTrackRefresh()
     } else {
+      stopVideoTrackRefresh()
+      nativeVideoRenderer.hide()
       restorePresentationViewAfterSystemPip()
     }
     if (lastKnownActive == active) return
@@ -143,6 +219,15 @@ object VicallPictureInPictureManager {
     }
     VicallPictureInPictureEventStore.emit("stateChanged", active = active)
     lastKnownActive = active
+  }
+
+  private fun startVideoTrackRefresh() {
+    mainHandler.removeCallbacks(refreshVideoTrack)
+    mainHandler.post(refreshVideoTrack)
+  }
+
+  private fun stopVideoTrackRefresh() {
+    mainHandler.removeCallbacks(refreshVideoTrack)
   }
 
   private fun requireSupported(context: Context) {
@@ -229,4 +314,22 @@ object VicallPictureInPictureManager {
     if (view == null || !view.isLaidOut) return null
     return Rect().takeIf(view::getGlobalVisibleRect)
   }
+
+  private fun transitionSourceRect(): Rect? {
+    val visible = visibleRect(presentationView.get() ?: sourceView.get())
+      ?: return null
+    if (visible.width() <= 0 || visible.height() <= 0) return null
+    val targetRatio = aspectRatio.toDouble()
+    val currentRatio = visible.width().toDouble() / visible.height().toDouble()
+    if (currentRatio > targetRatio) {
+      val width = (visible.height() * targetRatio).toInt().coerceAtLeast(1)
+      val left = visible.centerX() - width / 2
+      return Rect(left, visible.top, left + width, visible.bottom)
+    }
+    val height = (visible.width() / targetRatio).toInt().coerceAtLeast(1)
+    val top = visible.centerY() - height / 2
+    return Rect(visible.left, top, visible.right, top + height)
+  }
+
+  private const val VIDEO_TRACK_REFRESH_INTERVAL_MS = 1_000L
 }
