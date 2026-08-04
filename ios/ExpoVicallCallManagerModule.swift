@@ -176,12 +176,40 @@ public final class ExpoVicallCallManagerModule: Module {
       try VicallPictureInPictureManager.shared.setAutoEnterEnabled(enabled)
     }.runOnQueue(.main)
 
+    AsyncFunction("refreshPictureInPictureVideoTracks") {
+      (
+        videoViewTag: Int,
+        localVideoViewTag: Int?
+      ) in
+      guard let sourceView = appContext?.findView(
+        withTag: videoViewTag,
+        ofType: UIView.self
+      ) else {
+        throw VicallPictureInPictureError.sourceViewNotFound
+      }
+      let localVideoView = localVideoViewTag.flatMap { tag in
+        appContext?.findView(withTag: tag, ofType: UIView.self)
+      }
+      try VicallPictureInPictureManager.shared.refreshVideoTracks(
+        sourceView: sourceView,
+        localVideoView: localVideoView
+      )
+    }.runOnQueue(.main)
+
     AsyncFunction("startPictureInPicture") {
       try VicallPictureInPictureManager.shared.start()
     }.runOnQueue(.main)
 
     AsyncFunction("stopPictureInPicture") {
       VicallPictureInPictureManager.shared.stop()
+    }.runOnQueue(.main)
+
+    AsyncFunction("updatePictureInPictureState") { (state: [String: Any]) in
+      VicallPictureInPictureManager.shared.updateVisualState(state)
+    }.runOnQueue(.main)
+
+    AsyncFunction("completePictureInPictureRestore") { (restored: Bool) in
+      VicallPictureInPictureManager.shared.completeRestore(restored)
     }.runOnQueue(.main)
 
     AsyncFunction("disposePictureInPicture") {

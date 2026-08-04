@@ -9,9 +9,10 @@ Architecture only.
   full-screen intent, system Picture in Picture, and a `phoneCall` foreground service.
 - Notifications: incoming-call FCM data is intercepted natively; every other
   FCM message is forwarded to `expo-notifications`.
-- Media transport remains owned by RealtimeKit. For iOS PiP, this module reads
-  frames from the `@cloudflare/react-native-webrtc` video view and renders them
-  through `AVSampleBufferDisplayLayer`; it does not create another WebRTC session.
+- Media transport remains owned by RealtimeKit. For system PiP, this module
+  attaches a second native renderer to the existing
+  `@cloudflare/react-native-webrtc` video track; it does not create another
+  WebRTC session.
 
 CallKit and Android Telecom must be tested on physical devices.
 
@@ -20,7 +21,7 @@ CallKit and Android Telecom must be tested on physical devices.
 In the mobile application:
 
 ```sh
-npx expo install expo-notifications
+npx expo install expo-notifications react-native-gesture-handler react-native-reanimated react-native-safe-area-context
 npm install expo-vicall-call-manager
 ```
 
@@ -234,12 +235,144 @@ On Android 14+, call `canUseFullScreenIntent()` and offer
 `openFullScreenIntentSettings()` when the user has disabled full-screen call
 notifications.
 
+## Hybrid video-call presentation
+
+The optional `expo-vicall-call-manager/ui` entry point provides the complete
+presentation layer used around the RealtimeKit video views:
+
+- Fullscreen call UI with auto-hiding controls and a swipe-down minimize gesture.
+- A draggable local preview that snaps to the nearest safe-area corner.
+- iOS: swipe-down enters native system PiP immediately, including while the app
+  remains foreground. The same PiP continues over Home and other apps.
+- Android: swipe-down first becomes a draggable in-app mini-player. Leaving the
+  app then hands the existing Activity to Android system PiP.
+- The Android in-app mini-player snaps to a corner and can be stashed at either
+  screen edge; tapping its visible tab restores it.
+- The in-app mini-player stays above the software keyboard and returns to its
+  resting corner when the keyboard closes.
+- Android system PiP renders the existing RealtimeKit track through a dedicated
+  native surface, so React navigation, chat content, and the keyboard cannot
+  leak into the PiP window. A React surface handoff remains as a compatibility
+  fallback when a native track is not available.
+- System PiP restoration is acknowledged only after the fullscreen React layout
+  is ready, avoiding a blank transition back into the app.
+
+Mount the provider and overlay host once near the application root. In an Expo
+Router app, place this inside the existing theme provider in `routes/_layout.tsx`
+so any application components rendered by the call UI retain their theme context.
+
+```tsx
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  CallOverlayHost,
+  CallPresentationProvider,
+  type HybridCallSession,
+} from "expo-vicall-call-manager/ui";
+
+export function Root({ callSession }: { callSession: HybridCallSession | null }) {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <CallPresentationProvider
+          session={callSession}
+          onError={(error) => console.warn("Call presentation failed", error)}
+        >
+          <AppNavigation />
+          <CallOverlayHost />
+        </CallPresentationProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}
+```
+
+Build the controlled session from the current RealtimeKit state. Keep both
+`RTCView` elements and their refs stable for the lifetime of the call; the host
+morphs the same remote surface between layouts instead of reparenting it.
+
+```tsx
+import type { ComponentRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
+import { findNodeHandle } from "react-native";
+import { RTCView } from "@cloudflare/react-native-webrtc";
+import type { HybridCallSession } from "expo-vicall-call-manager/ui";
+
+export function useHybridCallSession(): HybridCallSession {
+  const remoteRef = useRef<ComponentRef<typeof RTCView>>(null);
+  const localRef = useRef<ComponentRef<typeof RTCView>>(null);
+
+  const getRemoteViewTag = useCallback(
+    () => findNodeHandle(remoteRef.current),
+    [],
+  );
+  const getLocalViewTag = useCallback(
+    () => findNodeHandle(localRef.current),
+    [],
+  );
+
+  const remoteVideo = useMemo(
+    () => (
+      <RTCView
+        ref={remoteRef}
+        objectFit="cover"
+        streamURL={remoteStreamURL}
+        style={{ flex: 1 }}
+      />
+    ),
+    [remoteStreamURL],
+  );
+
+  const localVideo = useMemo(
+    () => (
+      <RTCView
+        ref={localRef}
+        mirror
+        objectFit="cover"
+        streamURL={localStreamURL}
+        style={{ flex: 1 }}
+      />
+    ),
+    [localStreamURL],
+  );
+
+  return {
+    callId,
+    displayName,
+    connectionState: connected ? "connected" : "connecting",
+    remoteVideo,
+    localVideo,
+    localMuted,
+    remoteMuted,
+    localCameraEnabled,
+    remoteCameraEnabled,
+    pictureInPicture: {
+      getRemoteViewTag,
+      getLocalViewTag,
+      // Increment whenever RealtimeKit replaces the underlying remote track.
+      // The provider refreshes it even while native system PiP is active.
+      revision: remoteTrackRevision,
+    },
+    onToggleMicrophone: toggleMicrophone,
+    onToggleCamera: toggleCamera,
+    onSwitchCamera: switchCamera,
+    onEndCall: endCall,
+  };
+}
+```
+
+Set the provider's `session` to `null` after the call ends. Do not unmount the
+remote view, stop camera capture, or leave RealtimeKit solely because `AppState`
+becomes inactive/background while system PiP is active. Use `renderControlIcon`
+and `theme` to replace the default controls without forking the presentation
+state machine.
+
 ## Video-call Picture in Picture
 
-This package exposes system PiP on iOS 16.4+ and Android 8.0+ when the device reports
-support. Pass the native tag of the remote `RTCView`; on iOS the module attaches
-a second renderer to the same WebRTC track, while Android uses the view bounds
-as its transition source hint.
+This package exposes system PiP on iOS 16.4+ and Android 8.0+ when the device
+reports support. Pass the native tag of the remote `RTCView`; both platforms
+attach a second renderer to the same WebRTC track, while its view bounds are
+used as the transition source hint.
 
 ```tsx
 import type { ComponentRef } from "react";
@@ -301,8 +434,10 @@ await CallManager.preparePictureInPicture(remoteTag, localTag, {
 
 Do not disable the camera or leave RealtimeKit merely because React Native's
 `AppState` changes to `inactive` or `background`; first check
-`isPictureInPictureActive()`. Call `disposePictureInPicture()` when the call
-ends or when replacing the remote track.
+`isPictureInPictureActive()`. When RealtimeKit replaces the remote track, call
+`refreshPictureInPictureVideoTracks()` with the current tags (or increment the
+Hybrid session's `pictureInPicture.revision`). Call
+`disposePictureInPicture()` only when the call ends.
 
 Manual controls are also available:
 
@@ -311,15 +446,18 @@ if (await CallManager.isPictureInPictureSupported()) {
   await CallManager.startPictureInPicture();
 }
 
+await CallManager.refreshPictureInPictureVideoTracks(remoteTag, localTag);
 await CallManager.stopPictureInPicture();
 await CallManager.disposePictureInPicture();
 ```
 
 On Android, `stopPictureInPicture()` brings the existing single-task Activity
 back to the foreground because Android has no direct "exit PiP" method. The
-Android PiP window contains the current Activity, so hide every non-video
-control while the `stateChanged` event is active. On iOS, the system video-call
-PiP window is intentionally non-interactive.
+module places its dedicated native video surface above the Activity before the
+PiP transition; consumers using the low-level API should still hide custom
+controls while the `stateChanged` event is active to support the compatibility
+fallback. On iOS, the system video-call PiP window is intentionally
+non-interactive.
 
 ## Public API
 
@@ -339,10 +477,19 @@ PiP window is intentionally non-interactive.
 | `getInitialEvents()` | Reads events raised before JS subscribed. |
 | `isPictureInPictureSupported()` / `isPictureInPictureActive()` | Reads native PiP capability and state. |
 | `preparePictureInPicture(remoteTag, localTag, options)` | Connects system PiP to the active WebRTC video view. |
+| `refreshPictureInPictureVideoTracks(remoteTag, localTag)` | Rebinds active native PiP renderers after RealtimeKit replaces a video track. |
 | `startPictureInPicture()` / `stopPictureInPicture()` | Controls system PiP. |
 | `setPictureInPictureAutoEnterEnabled(enabled)` | Controls automatic entry when leaving the app. |
+| `updatePictureInPictureState(state)` | Updates native PiP camera/mute badges and display fallback. |
+| `completePictureInPictureRestore(restored)` | Completes iOS restoration after the React call layout is ready. |
 | `disposePictureInPicture()` | Detaches the frame renderer and releases native PiP resources. |
 | `getInitialPictureInPictureEvents()` | Reads PiP events raised before JS subscribed. |
+
+The `expo-vicall-call-manager/ui` entry point exports
+`CallPresentationProvider`, `CallOverlayHost`, `useCallPresentation`, the
+default theme, and all Hybrid presentation types. Its peer UI dependencies are
+optional only for applications using the low-level native API; install them
+when importing this entry point.
 
 ## Integration contract
 

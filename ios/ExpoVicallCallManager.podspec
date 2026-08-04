@@ -1,8 +1,8 @@
 Pod::Spec.new do |s|
   s.name           = 'ExpoVicallCallManager'
-  s.version        = '0.2.0'
-  s.summary        = 'CallKit, PushKit, and video-call Picture in Picture for Vicall'
-  s.description    = 'An Expo Modules API bridge for native iOS VoIP lifecycle and system Picture in Picture.'
+  s.version        = '0.3.0'
+  s.summary        = 'Native VoIP lifecycle and hybrid video-call presentation for Expo'
+  s.description    = 'An Expo Modules API bridge for CallKit, PushKit, Android Telecom, system Picture in Picture, and optional hybrid call UI.'
   s.author         = 'Vicall'
   s.homepage       = 'https://github.com/ngocdevv/expo-vicall-call-manager'
   s.license        = { :type => 'MIT', :file => '../LICENSE' }

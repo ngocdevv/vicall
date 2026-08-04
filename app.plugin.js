@@ -101,13 +101,14 @@ function configurePictureInPictureManifest(manifest) {
 }
 
 function addPictureInPictureCallback(contents, language) {
-  const marker = "expo-vicall-call-manager: PiP callback";
-  if (contents.includes(marker)) return contents;
+  const callbackMarker = "expo-vicall-call-manager: PiP callback";
+  const handoffMarker = "expo-vicall-call-manager: PiP handoff";
+  const pauseHandoffMarker = "expo-vicall-call-manager: PiP pause handoff";
+  let methods = "";
 
-  const method =
-    language === "java"
-      ? `
-  // ${marker}
+  if (!contents.includes(callbackMarker)) {
+    methods += language === "java" ? `
+  // ${callbackMarker}
   @Override
   public void onPictureInPictureModeChanged(
       boolean isInPictureInPictureMode,
@@ -116,9 +117,8 @@ function addPictureInPictureCallback(contents, language) {
     expo.modules.vicallcallmanager.VicallPictureInPictureManager
         .onPictureInPictureModeChanged(isInPictureInPictureMode);
   }
-`
-      : `
-  // ${marker}
+` : `
+  // ${callbackMarker}
   override fun onPictureInPictureModeChanged(
     isInPictureInPictureMode: Boolean,
     newConfig: android.content.res.Configuration,
@@ -128,12 +128,53 @@ function addPictureInPictureCallback(contents, language) {
       .onPictureInPictureModeChanged(isInPictureInPictureMode)
   }
 `;
+  }
+
+  if (!contents.includes(handoffMarker)) {
+    methods += language === "java" ? `
+  // ${handoffMarker}
+  @Override
+  public void onUserLeaveHint() {
+    expo.modules.vicallcallmanager.VicallPictureInPictureManager
+        .onUserLeaveHint(this);
+    super.onUserLeaveHint();
+  }
+` : `
+  // ${handoffMarker}
+  override fun onUserLeaveHint() {
+    expo.modules.vicallcallmanager.VicallPictureInPictureManager
+      .onUserLeaveHint(this)
+    super.onUserLeaveHint()
+  }
+`;
+  }
+
+  if (!contents.includes(pauseHandoffMarker)) {
+    methods += language === "java" ? `
+  // ${pauseHandoffMarker}
+  @Override
+  protected void onPause() {
+    expo.modules.vicallcallmanager.VicallPictureInPictureManager
+        .onActivityPausing(this);
+    super.onPause();
+  }
+` : `
+  // ${pauseHandoffMarker}
+  override fun onPause() {
+    expo.modules.vicallcallmanager.VicallPictureInPictureManager
+      .onActivityPausing(this)
+    super.onPause()
+  }
+`;
+  }
+
+  if (!methods) return contents;
 
   const lastBrace = contents.lastIndexOf("}");
   if (lastBrace < 0) {
     throw new Error("Unable to add the Picture in Picture callback to MainActivity");
   }
-  return `${contents.slice(0, lastBrace)}${method}${contents.slice(lastBrace)}`;
+  return `${contents.slice(0, lastBrace)}${methods}${contents.slice(lastBrace)}`;
 }
 
 function withVicallCallManager(config, props = {}) {

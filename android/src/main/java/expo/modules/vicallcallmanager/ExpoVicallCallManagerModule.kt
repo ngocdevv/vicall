@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.UUID
@@ -166,8 +167,18 @@ class ExpoVicallCallManagerModule : Module() {
       ->
       val activity = requireActivity()
       val videoView = appContext.findView<android.view.View>(videoViewTag)
-      VicallPictureInPictureManager.prepare(activity, videoView, options)
-    }
+      val presentationViewTag =
+        (options?.get("androidPresentationViewTag") as? Number)?.toInt()
+      val presentationView = presentationViewTag?.let { tag ->
+        runCatching { appContext.findView<android.view.View>(tag) }.getOrNull()
+      }
+      VicallPictureInPictureManager.prepare(
+        activity,
+        videoView,
+        presentationView,
+        options,
+      )
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("setPictureInPictureAutoEnterEnabled") {
       enabled: Boolean,
@@ -176,19 +187,40 @@ class ExpoVicallCallManagerModule : Module() {
         requireActivity(),
         enabled,
       )
-    }
+    }.runOnQueue(Queues.MAIN)
+
+    AsyncFunction("refreshPictureInPictureVideoTracks") {
+      videoViewTag: Int,
+      _: Int?,
+      ->
+      val videoView = appContext.findView<android.view.View>(videoViewTag)
+      VicallPictureInPictureManager.refreshSourceView(videoView)
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("startPictureInPicture") {
       VicallPictureInPictureManager.start(requireActivity())
-    }
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("stopPictureInPicture") {
       VicallPictureInPictureManager.stop(requireActivity())
+    }.runOnQueue(Queues.MAIN)
+
+    AsyncFunction("updatePictureInPictureState") {
+      state: Map<String, Any?>,
+      ->
+      VicallPictureInPictureManager.updateVisualState(state)
+    }.runOnQueue(Queues.MAIN)
+
+    AsyncFunction("completePictureInPictureRestore") {
+      _: Boolean,
+      ->
+      // Android restores its Activity directly and has no asynchronous
+      // AVPictureInPictureController-style restore completion callback.
     }
 
     AsyncFunction("disposePictureInPicture") {
       VicallPictureInPictureManager.dispose(appContext.currentActivity)
-    }
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("getInitialPictureInPictureEvents") {
       VicallPictureInPictureEventStore.initialEvents()

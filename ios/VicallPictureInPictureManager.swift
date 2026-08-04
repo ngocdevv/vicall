@@ -303,7 +303,14 @@ final class VicallPictureInPictureManager: NSObject {
   private var controller: AVPictureInPictureController?
   private var renderer: VicallSampleBufferVideoView?
   private var videoTrack: RTKRTCVideoTrack?
+  private var localMuteBadge: UIView?
+  private var remoteMuteBadge: UIView?
+  private var cameraOffView: UIView?
+  private var cameraOffLabel: UILabel?
+  private var visualState: [String: Any] = [:]
   private var autoEnterEnabled = true
+  private var restoreCompletionHandler: ((Bool) -> Void)?
+  private var restoreTimeoutWorkItem: DispatchWorkItem?
 
   private override init() {
     super.init()
@@ -338,11 +345,52 @@ final class VicallPictureInPictureManager: NSObject {
     contentViewController.preferredContentSize = CGSize(width: width, height: height)
     contentViewController.view.backgroundColor = .black
     contentViewController.view.addSubview(renderer)
+
+    let localMuteBadge = makeMuteBadge()
+    let remoteMuteBadge = makeMuteBadge()
+    let cameraOffView = UIView()
+    cameraOffView.translatesAutoresizingMaskIntoConstraints = false
+    cameraOffView.backgroundColor = .black
+
+    let cameraOffLabel = UILabel()
+    cameraOffLabel.translatesAutoresizingMaskIntoConstraints = false
+    cameraOffLabel.textAlignment = .center
+    cameraOffLabel.textColor = .white
+    cameraOffLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+    cameraOffLabel.numberOfLines = 2
+    cameraOffView.addSubview(cameraOffLabel)
+
+    contentViewController.view.addSubview(cameraOffView)
+    contentViewController.view.addSubview(localMuteBadge)
+    contentViewController.view.addSubview(remoteMuteBadge)
     NSLayoutConstraint.activate([
       renderer.leadingAnchor.constraint(equalTo: contentViewController.view.leadingAnchor),
       renderer.trailingAnchor.constraint(equalTo: contentViewController.view.trailingAnchor),
       renderer.topAnchor.constraint(equalTo: contentViewController.view.topAnchor),
-      renderer.bottomAnchor.constraint(equalTo: contentViewController.view.bottomAnchor)
+      renderer.bottomAnchor.constraint(equalTo: contentViewController.view.bottomAnchor),
+      cameraOffView.leadingAnchor.constraint(equalTo: contentViewController.view.leadingAnchor),
+      cameraOffView.trailingAnchor.constraint(equalTo: contentViewController.view.trailingAnchor),
+      cameraOffView.topAnchor.constraint(equalTo: contentViewController.view.topAnchor),
+      cameraOffView.bottomAnchor.constraint(equalTo: contentViewController.view.bottomAnchor),
+      cameraOffLabel.leadingAnchor.constraint(equalTo: cameraOffView.leadingAnchor, constant: 12),
+      cameraOffLabel.trailingAnchor.constraint(equalTo: cameraOffView.trailingAnchor, constant: -12),
+      cameraOffLabel.centerYAnchor.constraint(equalTo: cameraOffView.centerYAnchor),
+      localMuteBadge.leadingAnchor.constraint(
+        equalTo: contentViewController.view.leadingAnchor,
+        constant: 10
+      ),
+      localMuteBadge.bottomAnchor.constraint(
+        equalTo: contentViewController.view.bottomAnchor,
+        constant: -10
+      ),
+      remoteMuteBadge.trailingAnchor.constraint(
+        equalTo: contentViewController.view.trailingAnchor,
+        constant: -10
+      ),
+      remoteMuteBadge.bottomAnchor.constraint(
+        equalTo: contentViewController.view.bottomAnchor,
+        constant: -10
+      )
     ])
 
     let contentSource = AVPictureInPictureController.ContentSource(
@@ -359,8 +407,13 @@ final class VicallPictureInPictureManager: NSObject {
     self.sourceView = sourceView
     self.videoTrack = track
     self.renderer = renderer
+    self.localMuteBadge = localMuteBadge
+    self.remoteMuteBadge = remoteMuteBadge
+    self.cameraOffView = cameraOffView
+    self.cameraOffLabel = cameraOffLabel
     self.contentViewController = contentViewController
     self.controller = controller
+    applyVisualState()
   }
 
   func setAutoEnterEnabled(_ enabled: Bool) throws {
@@ -369,6 +422,34 @@ final class VicallPictureInPictureManager: NSObject {
       throw VicallPictureInPictureError.notPrepared
     }
     controller.canStartPictureInPictureAutomaticallyFromInline = enabled
+  }
+
+  func refreshVideoTracks(
+    sourceView: UIView,
+    localVideoView: UIView?
+  ) throws {
+    guard let controller, let contentViewController, let renderer else {
+      throw VicallPictureInPictureError.notPrepared
+    }
+    guard let nextTrack = videoTrack(from: sourceView) else {
+      throw VicallPictureInPictureError.videoTrackNotReady
+    }
+
+    if videoTrack !== nextTrack {
+      if let videoTrack {
+        videoTrack.remove(renderer)
+      }
+      renderer.flush()
+      nextTrack.add(renderer)
+      videoTrack = nextTrack
+    }
+
+    self.sourceView = sourceView
+    controller.contentSource = AVPictureInPictureController.ContentSource(
+      activeVideoCallSourceView: sourceView,
+      contentViewController: contentViewController
+    )
+    enableMultitaskingCameraAccess(from: localVideoView)
   }
 
   func start() throws {
@@ -385,7 +466,21 @@ final class VicallPictureInPictureManager: NSObject {
     controller?.stopPictureInPicture()
   }
 
+  func updateVisualState(_ state: [String: Any]) {
+    visualState.merge(state) { _, new in new }
+    applyVisualState()
+  }
+
+  func completeRestore(_ restored: Bool) {
+    restoreTimeoutWorkItem?.cancel()
+    restoreTimeoutWorkItem = nil
+    let completionHandler = restoreCompletionHandler
+    restoreCompletionHandler = nil
+    completionHandler?(restored)
+  }
+
   func dispose() {
+    completeRestore(false)
     controller?.delegate = nil
     controller?.contentSource = nil
     if let renderer, let videoTrack {
@@ -397,7 +492,50 @@ final class VicallPictureInPictureManager: NSObject {
     contentViewController = nil
     renderer = nil
     videoTrack = nil
+    localMuteBadge = nil
+    remoteMuteBadge = nil
+    cameraOffView = nil
+    cameraOffLabel = nil
     sourceView = nil
+  }
+
+  private func makeMuteBadge() -> UIView {
+    let badge = UIView()
+    badge.translatesAutoresizingMaskIntoConstraints = false
+    badge.backgroundColor = UIColor.black.withAlphaComponent(0.62)
+    badge.layer.cornerCurve = .continuous
+    badge.layer.cornerRadius = 14
+
+    let imageView = UIImageView(image: UIImage(systemName: "mic.slash.fill"))
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.contentMode = .scaleAspectFit
+    imageView.tintColor = .white
+    badge.addSubview(imageView)
+
+    NSLayoutConstraint.activate([
+      badge.widthAnchor.constraint(equalToConstant: 28),
+      badge.heightAnchor.constraint(equalToConstant: 28),
+      imageView.widthAnchor.constraint(equalToConstant: 14),
+      imageView.heightAnchor.constraint(equalToConstant: 14),
+      imageView.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
+      imageView.centerYAnchor.constraint(equalTo: badge.centerYAnchor)
+    ])
+    return badge
+  }
+
+  private func applyVisualState() {
+    localMuteBadge?.isHidden = !(visualState["localMuted"] as? Bool ?? false)
+    remoteMuteBadge?.isHidden = !(visualState["remoteMuted"] as? Bool ?? false)
+
+    let remoteCameraEnabled =
+      visualState["remoteCameraEnabled"] as? Bool ?? true
+    cameraOffView?.isHidden = remoteCameraEnabled
+    if let displayName = visualState["displayName"] as? String,
+       !displayName.isEmpty {
+      cameraOffLabel?.text = "\(displayName)\nCamera off"
+    } else {
+      cameraOffLabel?.text = "Camera off"
+    }
   }
 
   private func positiveNumber(_ value: Any?) -> CGFloat? {
@@ -480,7 +618,14 @@ extension VicallPictureInPictureManager: AVPictureInPictureControllerDelegate {
     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler:
       @escaping (Bool) -> Void
   ) {
+    completeRestore(false)
+    restoreCompletionHandler = completionHandler
     VicallPictureInPictureEventStore.shared.emit(type: "restoreRequested", active: true)
-    completionHandler(true)
+
+    let timeout = DispatchWorkItem { [weak self] in
+      self?.completeRestore(false)
+    }
+    restoreTimeoutWorkItem = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: timeout)
   }
 }

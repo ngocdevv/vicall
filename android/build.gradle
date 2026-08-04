@@ -4,14 +4,14 @@ plugins {
 }
 
 group = 'expo.modules.vicallcallmanager'
-version = '0.2.0'
+version = '0.3.0'
 
 android {
   namespace "expo.modules.vicallcallmanager"
 
   defaultConfig {
-    versionCode 2
-    versionName "0.2.0"
+    versionCode 3
+    versionName "0.3.0"
   }
 
   lint {
@@ -21,6 +21,7 @@ android {
 
 dependencies {
   implementation "androidx.core:core-ktx:1.16.0"
+  compileOnly "com.cloudflare.realtimekit:webrtc-android:137.7151.10.2"
   compileOnly "host.exp.exponent:expo.modules.notifications:56.0.22"
   compileOnly "com.google.firebase:firebase-messaging:25.0.1"
 }

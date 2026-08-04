@@ -9,6 +9,7 @@ import type {
   OutgoingCall,
   PictureInPictureEvent,
   PictureInPictureOptions,
+  PictureInPictureVisualState,
 } from "./ExpoVicallCallManager.types";
 
 declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallManagerEvents> {
@@ -43,9 +44,17 @@ declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallMan
     localVideoViewTag: number | null,
     options?: PictureInPictureOptions,
   ): Promise<void>;
+  refreshPictureInPictureVideoTracks(
+    videoViewTag: number,
+    localVideoViewTag: number | null,
+  ): Promise<void>;
   setPictureInPictureAutoEnterEnabled(enabled: boolean): Promise<void>;
   startPictureInPicture(): Promise<void>;
   stopPictureInPicture(): Promise<void>;
+  updatePictureInPictureState(
+    state: PictureInPictureVisualState,
+  ): Promise<void>;
+  completePictureInPictureRestore(restored: boolean): Promise<void>;
   disposePictureInPicture(): Promise<void>;
   getInitialPictureInPictureEvents(): Promise<PictureInPictureEvent[]>;
   clearInitialPictureInPictureEvents(): Promise<void>;

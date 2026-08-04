@@ -59,6 +59,8 @@ export interface PictureInPictureOptions {
     seamlessResizeEnabled?: boolean;
     /** Optional Android screen-space transition source rectangle. */
     sourceRect?: PictureInPictureSourceRect;
+    /** @internal Native tag of the Hybrid presentation surface on Android. */
+    androidPresentationViewTag?: number;
 }
 export interface PictureInPictureEvent {
     eventId: string;
@@ -66,6 +68,12 @@ export interface PictureInPictureEvent {
     timestamp: number;
     active: boolean;
     error?: string;
+}
+export interface PictureInPictureVisualState {
+    displayName?: string;
+    localMuted?: boolean;
+    remoteMuted?: boolean;
+    remoteCameraEnabled?: boolean;
 }
 export interface ExpoVicallCallManagerEvents {
     [event: string]: (...args: any[]) => void;
