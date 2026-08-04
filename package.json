@@ -1,6 +1,6 @@
 {
   "name": "expo-vicall-call-manager",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Expo module for native VoIP calls and hybrid video-call presentation on iOS and Android",
   "repository": {
     "type": "git",

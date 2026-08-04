@@ -196,8 +196,15 @@ public final class ExpoVicallCallManagerModule: Module {
       )
     }.runOnQueue(.main)
 
-    AsyncFunction("startPictureInPicture") {
-      try VicallPictureInPictureManager.shared.start()
+    AsyncFunction("startPictureInPicture") { (promise: Promise) in
+      VicallPictureInPictureManager.shared.start { result in
+        switch result {
+        case .success:
+          promise.resolve()
+        case .failure(let error):
+          promise.reject(error)
+        }
+      }
     }.runOnQueue(.main)
 
     AsyncFunction("stopPictureInPicture") {
