@@ -1,6 +1,5 @@
-import { NativeModule } from "expo";
 import type { CallEndReason, CallEvent, ExpoVicallCallManagerEvents, IncomingCall, NativeCall, OutgoingCall, PictureInPictureEvent, PictureInPictureOptions, PictureInPictureVisualState } from "./ExpoVicallCallManager.types";
-declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallManagerEvents> {
+type ExpoVicallCallManagerModule = {
     setup(): Promise<void>;
     displayIncomingCall(call: IncomingCall): Promise<void>;
     startCall(call: OutgoingCall): Promise<void>;
@@ -32,7 +31,10 @@ declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallMan
     disposePictureInPicture(): Promise<void>;
     getInitialPictureInPictureEvents(): Promise<PictureInPictureEvent[]>;
     clearInitialPictureInPictureEvents(): Promise<void>;
-}
-declare const _default: ExpoVicallCallManagerModule;
-export default _default;
+    addListener<EventName extends keyof ExpoVicallCallManagerEvents>(eventName: EventName, listener: ExpoVicallCallManagerEvents[EventName]): {
+        remove(): void;
+    };
+};
+declare const CallManager: ExpoVicallCallManagerModule;
+export default CallManager;
 //# sourceMappingURL=ExpoVicallCallManagerModule.d.ts.map

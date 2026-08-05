@@ -1,10 +1,62 @@
+const path = require("path");
+const { createRequire } = require("module");
+
+function loadConfigPlugins() {
+  const attempts = [];
+
+  const tryRequire = (label, req, id) => {
+    try {
+      return req(id);
+    } catch (error) {
+      attempts.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  };
+
+  // 1) Normal resolution (published package / monorepo with hoisted deps).
+  let plugins =
+    tryRequire("default:@expo/config-plugins", require, "@expo/config-plugins") ||
+    tryRequire("default:expo/config-plugins", require, "expo/config-plugins");
+  if (plugins) return plugins;
+
+  // 2) Host app node_modules when this package is file:-linked and its own
+  //    node_modules only contain thin symlinks (or are empty).
+  const hostCandidates = [
+    // VicallApp/node_modules when package lives at Documents/Vicall
+    path.resolve(__dirname, "../VicallApp/package.json"),
+    // node_modules/expo-vicall-call-manager -> ../../Vicall  ⇒ app package.json
+    path.resolve(__dirname, "../../package.json"),
+    path.resolve(__dirname, "../../../package.json"),
+  ];
+
+  for (const pkgJson of hostCandidates) {
+    try {
+      const hostRequire = createRequire(pkgJson);
+      plugins =
+        tryRequire(`host:${pkgJson}:@expo/config-plugins`, hostRequire, "@expo/config-plugins") ||
+        tryRequire(`host:${pkgJson}:expo/config-plugins`, hostRequire, "expo/config-plugins");
+      if (plugins) return plugins;
+    } catch {
+      // package.json may not exist for this candidate
+    }
+  }
+
+  throw new Error(
+    [
+      "expo-vicall-call-manager config plugin could not load @expo/config-plugins.",
+      "Install it in the host app (comes with expo) and re-run scripts/link-vicall-module.sh.",
+      ...attempts.map((line) => `  - ${line}`),
+    ].join("\n"),
+  );
+}
+
 const {
   AndroidConfig,
   createRunOncePlugin,
   withAndroidManifest,
   withInfoPlist,
   withMainActivity,
-} = require("@expo/config-plugins");
+} = loadConfigPlugins();
 
 const pkg = require("./package.json");
 

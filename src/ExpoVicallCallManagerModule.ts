@@ -1,4 +1,4 @@
-import { NativeModule, requireNativeModule } from "expo";
+import { requireNativeModule } from "expo";
 
 import type {
   CallEndReason,
@@ -12,7 +12,7 @@ import type {
   PictureInPictureVisualState,
 } from "./ExpoVicallCallManager.types";
 
-declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallManagerEvents> {
+type ExpoVicallCallManagerModule = {
   setup(): Promise<void>;
   displayIncomingCall(call: IncomingCall): Promise<void>;
   startCall(call: OutgoingCall): Promise<void>;
@@ -58,8 +58,47 @@ declare class ExpoVicallCallManagerModule extends NativeModule<ExpoVicallCallMan
   disposePictureInPicture(): Promise<void>;
   getInitialPictureInPictureEvents(): Promise<PictureInPictureEvent[]>;
   clearInitialPictureInPictureEvents(): Promise<void>;
+  addListener<EventName extends keyof ExpoVicallCallManagerEvents>(
+    eventName: EventName,
+    listener: ExpoVicallCallManagerEvents[EventName],
+  ): { remove(): void };
+};
+
+let cachedModule: ExpoVicallCallManagerModule | undefined;
+
+/**
+ * Lazily resolve the native module so importing pure JS helpers
+ * (protocol / lifecycle) does not crash before the Expo runtime is ready.
+ * Still throws a clear error when native APIs are actually invoked without
+ * a development build that autolinks ExpoVicallCallManager.
+ */
+function getNativeModule(): ExpoVicallCallManagerModule {
+  if (cachedModule) return cachedModule;
+  try {
+    cachedModule = requireNativeModule<ExpoVicallCallManagerModule>(
+      "ExpoVicallCallManager",
+    );
+    return cachedModule;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error);
+    throw new Error(
+      [
+        "Native module ExpoVicallCallManager is unavailable.",
+        "Ensure expo-vicall-call-manager is autolinked (not nested under another package's node_modules)",
+        "and rebuild the dev client after prebuild/pod install.",
+        `Underlying error: ${message}`,
+      ].join(" "),
+    );
+  }
 }
 
-export default requireNativeModule<ExpoVicallCallManagerModule>(
-  "ExpoVicallCallManager",
-);
+const CallManager = new Proxy({} as ExpoVicallCallManagerModule, {
+  get(_target, property, receiver) {
+    const mod = getNativeModule();
+    const value = Reflect.get(mod as object, property, receiver);
+    return typeof value === "function" ? value.bind(mod) : value;
+  },
+});
+
+export default CallManager;
