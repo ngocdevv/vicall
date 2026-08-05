@@ -4,6 +4,21 @@ This document is the authoritative integration guide for **backend/edge services
 and **React Native host applications** that connect through
 `expo-vicall-call-manager`.
 
+> Public JS/native API is documented CallKeep-style in the root [README](../README.md)
+> (method tables, per-method params, event catalog). This file owns the **service contract**.
+
+## Summary
+
+- [1. Shared call identity](#1-shared-call-identity)
+- [2. Responsibility split](#2-responsibility-split-do-not-blur)
+- [3. Backend push contracts](#3-backend-push-contracts)
+- [4. React Native host bootstrap](#4-react-native-host-bootstrap)
+- [5. End-to-end sequence](#5-end-to-end-sequence)
+- [6. Token registration](#6-token-registration)
+- [7. Validation helpers](#7-validation-helpers-for-services)
+- [8. Production acceptance matrix](#8-production-acceptance-matrix)
+- [9. Package entry points](#9-package-entry-points)
+
 The module is **not** a media SDK. It is the system-call bridge:
 
 | Layer | Owns |

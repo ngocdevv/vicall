@@ -3,6 +3,19 @@
 `expo-vicall-call-manager` is a **system-call engine** for React Native, not an
 in-call UI kit.
 
+> API reference style matches [react-native-callkeep](https://github.com/react-native-webrtc/react-native-callkeep):
+> see the root [README](../README.md) for Installation, Usage, API tables, and Events.
+
+## Summary
+
+- [Layer ownership](#layer-ownership)
+- [What the module does](#what-the-module-does)
+- [What the host app must do](#what-the-host-app-must-do)
+- [Package surface](#package-surface)
+- [Recommended product flow](#recommended-product-flow-audio--video)
+
+## Layer ownership
+
 It mirrors how large social clients (including X) separate concerns:
 
 | Layer | Owner | Examples |
